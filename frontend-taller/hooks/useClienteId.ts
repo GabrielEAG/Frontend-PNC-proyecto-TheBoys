@@ -23,15 +23,19 @@ export function useClienteId() {
 export function useMecanicoId() {
   const { user } = useAuth();
   const [mecanicoId, setMecanicoId] = useState<number | null>(null);
+  const [sucursalId, setSucursalId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user?.id) return;
     mecanicoApi.getByUsuarioId(user.id)
-      .then(res => setMecanicoId(res.data.id))
-      .catch(() => setMecanicoId(null))
+      .then(res => {
+        setMecanicoId(res.data.id);
+        setSucursalId(res.data.sucursalId ?? null);
+      })
+      .catch(() => { setMecanicoId(null); setSucursalId(null); })
       .finally(() => setLoading(false));
   }, [user?.id]);
 
-  return { mecanicoId, loading };
+  return { mecanicoId, sucursalId, loading };
 }

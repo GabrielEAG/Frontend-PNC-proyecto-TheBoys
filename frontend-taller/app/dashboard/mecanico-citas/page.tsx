@@ -9,7 +9,7 @@ import { Calendar, Clock, MapPin, Car, CheckCircle, XCircle, RefreshCw } from 'l
 type TabType = 'pendientes' | 'miscitas';
 
 export default function MecanicoCitasPage() {
-  const { mecanicoId, loading: loadingMec } = useMecanicoId();
+  const { mecanicoId, sucursalId, loading: loadingMec } = useMecanicoId();
   const [activeTab, setActiveTab] = useState<TabType>('pendientes');
   const [citasPendientes, setCitasPendientes] = useState<Cita[]>([]);
   const [misCitas, setMisCitas] = useState<Cita[]>([]);
@@ -19,16 +19,15 @@ export default function MecanicoCitasPage() {
   const [nuevaHora, setNuevaHora] = useState('');
 
   useEffect(() => {
-    if (mecanicoId) fetchCitas();
-  }, [mecanicoId]);
+    if (mecanicoId && sucursalId) fetchCitas();
+  }, [mecanicoId, sucursalId]);
 
   const fetchCitas = async () => {
-    if (!mecanicoId) return;
+    if (!mecanicoId || !sucursalId) return;
     try {
       setLoading(true);
-      // ✅ GET /citas/pendientes — las sin mecánico para que el mecánico las acepte
       const [pendientesRes, misRes] = await Promise.all([
-        citaApi.getPendientes(),
+        citaApi.getPendientes(sucursalId),
         citaApi.getByMecanico(mecanicoId),
       ]);
       setCitasPendientes(pendientesRes.data);
@@ -40,7 +39,6 @@ export default function MecanicoCitasPage() {
     }
   };
 
-  // ✅ PATCH /citas/{id}/aceptar?mecanicoId=X
   const handleAceptar = async (citaId: number) => {
     if (!mecanicoId) return;
     try {
@@ -63,7 +61,6 @@ export default function MecanicoCitasPage() {
     }
   };
 
-  // ✅ PATCH /citas/{id}/reprogramar
   const handleReprogramar = async (citaId: number) => {
     if (!nuevaFecha || !nuevaHora) { alert('Selecciona fecha y hora'); return; }
     try {
