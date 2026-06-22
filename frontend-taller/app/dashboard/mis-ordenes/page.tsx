@@ -1,31 +1,26 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useAuth } from '@/hooks/useAuth';
+import { useCallback, useEffect, useState } from 'react';
 import { useClienteId } from '@/hooks/useClienteId';
 import { ordenApi } from '@/lib/api';
 import { OrdenTrabajoResponse } from '@/types';
-import { Clock, CheckCircle, AlertCircle, Eye, CreditCard, Wrench, DollarSign } from 'lucide-react';
+import { Clock, CheckCircle, AlertCircle, CreditCard, Wrench, DollarSign } from 'lucide-react';
 import Link from 'next/link';
 
 type TabType = 'activas' | 'historial';
 
 export default function MisOrdenesPage() {
-  const { user } = useAuth();
   const { clienteId, loading: loadingCliente } = useClienteId();
   const [activeTab, setActiveTab] = useState<TabType>('activas');
   const [ordenes, setOrdenes] = useState<OrdenTrabajoResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    if (clienteId) fetchOrdenes();
-  }, [clienteId]);
-
-  const fetchOrdenes = async () => {
+  const fetchOrdenes = useCallback(async () => {
     if (!clienteId) return;
     try {
       setLoading(true);
+      setError('');
       const response = await ordenApi.getByCliente(clienteId);
       setOrdenes(response.data);
     } catch (err: any) {
@@ -33,7 +28,19 @@ export default function MisOrdenesPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [clienteId]);
+
+  useEffect(() => {
+    if (loadingCliente) return;
+    if (!clienteId) {
+      setOrdenes([]);
+      setLoading(false);
+      setError('No se encontro un perfil de cliente para esta cuenta.');
+      return;
+    }
+
+    void fetchOrdenes();
+  }, [clienteId, loadingCliente, fetchOrdenes]);
 
   const ordenesActivas   = ordenes.filter(o => !['COMPLETADA', 'CANCELADA'].includes(o.estado));
   const ordenesHistorial = ordenes.filter(o =>  ['COMPLETADA', 'CANCELADA'].includes(o.estado));
@@ -52,7 +59,7 @@ export default function MisOrdenesPage() {
   const handleAprobarPresupuesto = async (ordenId: number) => {
     try {
       await ordenApi.aprobarPresupuesto(ordenId);
-      fetchOrdenes();
+      void fetchOrdenes();
       alert('Presupuesto aprobado. La orden está en progreso.');
     } catch (err: any) {
       alert(err.response?.data?.message || 'Error al aprobar presupuesto');
@@ -63,7 +70,7 @@ export default function MisOrdenesPage() {
     if (confirm('¿Rechazar el presupuesto? El mecánico será notificado para negociar.')) {
       try {
         await ordenApi.rechazarPresupuesto(ordenId);
-        fetchOrdenes();
+        void fetchOrdenes();
         alert('Presupuesto rechazado. El mecánico será notificado.');
       } catch (err: any) {
         alert(err.response?.data?.message || 'Error al rechazar presupuesto');

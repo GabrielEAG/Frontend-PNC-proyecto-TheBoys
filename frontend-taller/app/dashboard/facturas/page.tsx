@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useClienteId } from '@/hooks/useClienteId';
 import { facturaApi } from '@/lib/api';
 import { Factura } from '@/types';
@@ -13,14 +13,11 @@ export default function FacturasPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    if (clienteId) fetchFacturas();
-  }, [clienteId]);
-
-  const fetchFacturas = async () => {
+  const fetchFacturas = useCallback(async () => {
     if (!clienteId) return;
     try {
       setLoading(true);
+      setError('');
       const res = await facturaApi.getByCliente(clienteId);
       setFacturas(res.data);
     } catch (err: any) {
@@ -28,7 +25,19 @@ export default function FacturasPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [clienteId]);
+
+  useEffect(() => {
+    if (loadingCliente) return;
+    if (!clienteId) {
+      setFacturas([]);
+      setLoading(false);
+      setError('No se encontro un perfil de cliente para esta cuenta.');
+      return;
+    }
+
+    void fetchFacturas();
+  }, [clienteId, loadingCliente, fetchFacturas]);
 
   const getEstadoInfo = (estado: string) => {
     const estados: Record<string, { color: string; text: string; icon: any }> = {

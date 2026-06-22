@@ -5,6 +5,9 @@ export interface Usuario {
   apellido?: string;
   rol: 'ADMIN' | 'MECANICO' | 'CLIENTE';
   bloqueado?: boolean;
+  clienteId?: number | null;
+  mecanicoId?: number | null;
+  sucursalId?: number | null;
 }
 
 export interface AuthResponse {
@@ -14,6 +17,9 @@ export interface AuthResponse {
   nombre: string;
   apellido?: string;
   id?: number;
+  clienteId?: number | null;
+  mecanicoId?: number | null;
+  sucursalId?: number | null;
 }
 
 export interface RegisterRequest {
@@ -47,6 +53,7 @@ export interface Cliente {
   apellido?: string;
   email?: string;
   telefono: string;
+  direccion?: string | null;
 }
 
 export interface Mecanico {

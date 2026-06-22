@@ -1,79 +1,122 @@
 'use client';
 
-import { useState } from 'react';
-import { Car, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+
+export interface VehiculoFormData {
+  patente: string;
+  marca: string;
+  modelo: string;
+  clienteId: number;
+}
 
 interface VehiculoFormProps {
-  onSubmit: (data: any) => Promise<void>;
+  onSubmit: (data: VehiculoFormData) => Promise<void>;
   onClose: () => void;
-  clienteId?: number;
+  clienteId?: number | null;
 }
 
 export default function VehiculoForm({ onSubmit, onClose, clienteId }: VehiculoFormProps) {
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<VehiculoFormData>({
     patente: '',
     marca: '',
     modelo: '',
-    clienteId: clienteId || 0,
+    clienteId: clienteId ?? 0,
   });
+
+  useEffect(() => {
+    setFormData((prev) => ({ ...prev, clienteId: clienteId ?? 0 }));
+  }, [clienteId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.patente || !formData.marca || !formData.modelo) {
-      alert('Por favor completa los campos obligatorios'); return;
+    if (!clienteId) {
+      alert('No se pudo identificar tu perfil de cliente');
+      return;
     }
+    if (!formData.patente || !formData.marca || !formData.modelo) {
+      alert('Completa los campos obligatorios');
+      return;
+    }
+
     setLoading(true);
     try {
-      await onSubmit(formData);
+      await onSubmit({
+        ...formData,
+        patente: formData.patente.trim().toUpperCase(),
+        marca: formData.marca.trim(),
+        modelo: formData.modelo.trim(),
+        clienteId,
+      });
       onClose();
-    } catch (error) {
-      console.error('Error:', error);
-      alert('Error al registrar el vehículo');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="bg-white rounded-lg max-w-md w-full mx-4 p-6">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-bold flex items-center gap-2">
-          <Car size={20} /> Registrar Vehículo
-        </h2>
-        <button onClick={onClose} className="text-gray-500 hover:text-gray-700"><X size={24} /></button>
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {!clienteId && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          No se pudo cargar tu perfil de cliente. Cierra sesion e inicia sesion otra vez.
+        </div>
+      )}
+
+      <div>
+        <label className="mb-1 block text-sm font-bold text-gray-700">Patente *</label>
+        <input
+          type="text"
+          value={formData.patente}
+          onChange={(e) => setFormData({ ...formData, patente: e.target.value.toUpperCase() })}
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 uppercase focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="ABC-1234"
+          maxLength={20}
+          required
+        />
       </div>
 
-      <form onSubmit={handleSubmit}>
-        <div className="mb-4">
-          <label className="block text-gray-700 text-sm font-bold mb-2">Patente *</label>
-          <input type="text" value={formData.patente}
-            onChange={e => setFormData({ ...formData, patente: e.target.value.toUpperCase() })}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase"
-            placeholder="ABC-1234" required />
-        </div>
+      <div>
+        <label className="mb-1 block text-sm font-bold text-gray-700">Marca *</label>
+        <input
+          type="text"
+          value={formData.marca}
+          onChange={(e) => setFormData({ ...formData, marca: e.target.value })}
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="Toyota, Honda, Nissan..."
+          maxLength={50}
+          required
+        />
+      </div>
 
-        <div className="mb-4">
-          <label className="block text-gray-700 text-sm font-bold mb-2">Marca *</label>
-          <input type="text" value={formData.marca}
-            onChange={e => setFormData({ ...formData, marca: e.target.value })}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="Toyota, Honda, Nissan..." required />
-        </div>
+      <div>
+        <label className="mb-1 block text-sm font-bold text-gray-700">Modelo *</label>
+        <input
+          type="text"
+          value={formData.modelo}
+          onChange={(e) => setFormData({ ...formData, modelo: e.target.value })}
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          placeholder="Corolla, Civic, Sentra..."
+          maxLength={50}
+          required
+        />
+      </div>
 
-        <div className="mb-4">
-          <label className="block text-gray-700 text-sm font-bold mb-2">Modelo *</label>
-          <input type="text" value={formData.modelo}
-            onChange={e => setFormData({ ...formData, modelo: e.target.value })}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="Corolla, Civic, Sentra..." required />
-        </div>
-
-        <button type="submit" disabled={loading}
-          className="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-2 px-4 rounded-lg transition disabled:opacity-50">
-          {loading ? 'Registrando...' : 'Registrar Vehículo'}
+      <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Cancelar
         </button>
-      </form>
-    </div>
+        <button
+          type="submit"
+          disabled={loading || !clienteId}
+          className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {loading ? 'Registrando...' : 'Registrar vehiculo'}
+        </button>
+      </div>
+    </form>
   );
 }

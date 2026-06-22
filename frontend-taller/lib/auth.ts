@@ -2,19 +2,24 @@
 import api from './api';
 import { AuthResponse, LoginRequest, RegisterRequest, Usuario } from '@/types';
 
+const buildStoredUser = (data: AuthResponse): Usuario => ({
+  id: Number(data.id) || 0,
+  email: data.email,
+  nombre: data.nombre,
+  apellido: data.apellido,
+  rol: data.rol as Usuario['rol'],
+  clienteId: data.clienteId ?? null,
+  mecanicoId: data.mecanicoId ?? null,
+  sucursalId: data.sucursalId ?? null,
+});
+
 export const auth = {
   async login(credentials: LoginRequest): Promise<AuthResponse> {
     const response = await api.post('/auth/login', credentials);
     
     // Guardar token y datos en localStorage
     localStorage.setItem('token', response.data.token);
-    localStorage.setItem('user', JSON.stringify({
-      id: response.data.id,
-      email: response.data.email,
-      nombre: response.data.nombre,
-      apellido: response.data.apellido,
-      rol: response.data.rol,
-    }));
+    localStorage.setItem('user', JSON.stringify(buildStoredUser(response.data)));
     
     return response.data;
   },
@@ -25,13 +30,7 @@ export const auth = {
     const response = await api.post('/auth/register', data);
     
     localStorage.setItem('token', response.data.token);
-    localStorage.setItem('user', JSON.stringify({
-      id: response.data.id,
-      email: response.data.email,
-      nombre: response.data.nombre,
-      apellido: response.data.apellido,
-      rol: response.data.rol,
-    }));
+    localStorage.setItem('user', JSON.stringify(buildStoredUser(response.data)));
     
     return response.data;
   },

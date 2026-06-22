@@ -1,162 +1,238 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useMemo, useState } from 'react';
 import { Sucursal, Vehiculo, Servicio } from '@/types';
-import { Calendar, Clock, MapPin, Car, Wrench, X } from 'lucide-react';
+import { Calendar, Clock, MapPin, Car, Wrench } from 'lucide-react';
+
+export interface CitaFormData {
+  sucursalId: string;
+  patente: string;
+  fecha: string;
+  hora: string;
+  serviciosIds: number[];
+}
 
 interface CitaFormProps {
   sucursales: Sucursal[];
   vehiculos: Vehiculo[];
   servicios: Servicio[];
-  onSubmit: (data: any) => Promise<void>;
+  onSubmit: (data: CitaFormData) => Promise<void>;
   onClose: () => void;
+  onAddVehiculo?: () => void;
   servicioPreseleccionado?: number;
 }
 
+const buildInitialForm = (servicioPreseleccionado?: number): CitaFormData => ({
+  sucursalId: '',
+  patente: '',
+  fecha: '',
+  hora: '',
+  serviciosIds: servicioPreseleccionado ? [servicioPreseleccionado] : [],
+});
+
 export default function CitaForm({
-  sucursales, vehiculos, servicios, onSubmit, onClose, servicioPreseleccionado,
+  sucursales,
+  vehiculos,
+  servicios,
+  onSubmit,
+  onClose,
+  onAddVehiculo,
+  servicioPreseleccionado,
 }: CitaFormProps) {
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    sucursalId: '',
-    // ✅ Vehiculo no tiene id, usa patente como identificador
-    patente: '',
-    fecha: '',
-    hora: '',
-    serviciosIds: [] as number[],
-  });
+  const [formData, setFormData] = useState<CitaFormData>(() => buildInitialForm(servicioPreseleccionado));
 
-  useEffect(() => {
-    if (servicioPreseleccionado && !formData.serviciosIds.includes(servicioPreseleccionado)) {
-      setFormData(prev => ({ ...prev, serviciosIds: [...prev.serviciosIds, servicioPreseleccionado] }));
-    }
-  }, [servicioPreseleccionado]);
+  const serviciosActivos = useMemo(
+    () => servicios.filter((servicio) => servicio.estado === 'ACTIVO'),
+    [servicios]
+  );
+
+  const horasDisponibles = useMemo(() => {
+    const horas = Array.from({ length: 10 }, (_, i) => `${(9 + i).toString().padStart(2, '0')}:00`);
+    const hoy = new Date().toISOString().split('T')[0];
+    if (formData.fecha !== hoy) return horas;
+
+    const ahora = new Date();
+    return horas.filter((hora) => {
+      const [hour] = hora.split(':').map(Number);
+      return hour > ahora.getHours();
+    });
+  }, [formData.fecha]);
+
+  const faltanDatosBase = sucursales.length === 0 || vehiculos.length === 0 || serviciosActivos.length === 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (faltanDatosBase || loading) return;
     if (!formData.sucursalId || !formData.patente || !formData.fecha || !formData.hora) {
-      alert('Por favor completa todos los campos obligatorios'); return;
+      alert('Completa todos los campos obligatorios');
+      return;
     }
-    if (formData.serviciosIds.length === 0) { alert('Selecciona al menos un servicio'); return; }
+    if (formData.serviciosIds.length === 0) {
+      alert('Selecciona al menos un servicio');
+      return;
+    }
+
     setLoading(true);
     try {
       await onSubmit(formData);
       onClose();
-    } catch (error) {
-      console.error('Error:', error);
     } finally {
       setLoading(false);
     }
   };
 
   const toggleServicio = (servicioId: number) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
       serviciosIds: prev.serviciosIds.includes(servicioId)
-        ? prev.serviciosIds.filter(id => id !== servicioId)
+        ? prev.serviciosIds.filter((id) => id !== servicioId)
         : [...prev.serviciosIds, servicioId],
     }));
   };
 
-  const horasDisponibles = Array.from({ length: 11 }, (_, i) =>
-    `${(9 + i).toString().padStart(2, '0')}:00`
-  );
-
   return (
-    <div className="bg-white rounded-lg max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
-      <div className="p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold">Agendar Nueva Cita</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700"><X size={24} /></button>
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {faltanDatosBase && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          {sucursales.length === 0 && <p>No hay sucursales disponibles para agendar.</p>}
+          {vehiculos.length === 0 && (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <p>Registra un vehiculo antes de crear una cita.</p>
+              {onAddVehiculo && (
+                <button
+                  type="button"
+                  onClick={onAddVehiculo}
+                  className="rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700"
+                >
+                  Agregar vehiculo
+                </button>
+              )}
+            </div>
+          )}
+          {serviciosActivos.length === 0 && <p>No hay servicios activos para seleccionar.</p>}
+        </div>
+      )}
+
+      <div>
+        <label className="mb-1 flex items-center gap-2 text-sm font-bold text-gray-700">
+          <MapPin size={16} /> Sucursal *
+        </label>
+        <select
+          value={formData.sucursalId}
+          onChange={(e) => setFormData({ ...formData, sucursalId: e.target.value })}
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          disabled={sucursales.length === 0}
+          required
+        >
+          <option value="">Seleccionar sucursal</option>
+          {sucursales.map((sucursal) => (
+            <option key={sucursal.id} value={sucursal.id}>
+              {sucursal.nombre} - {sucursal.departamento}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="mb-1 flex items-center gap-2 text-sm font-bold text-gray-700">
+          <Car size={16} /> Vehiculo *
+        </label>
+        <select
+          value={formData.patente}
+          onChange={(e) => setFormData({ ...formData, patente: e.target.value })}
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          disabled={vehiculos.length === 0}
+          required
+        >
+          <option value="">Seleccionar vehiculo</option>
+          {vehiculos.map((vehiculo) => (
+            <option key={vehiculo.patente} value={vehiculo.patente}>
+              {vehiculo.marca} {vehiculo.modelo} - {vehiculo.patente}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label className="mb-1 flex items-center gap-2 text-sm font-bold text-gray-700">
+            <Calendar size={16} /> Fecha *
+          </label>
+          <input
+            type="date"
+            value={formData.fecha}
+            onChange={(e) => setFormData({ ...formData, fecha: e.target.value, hora: '' })}
+            min={new Date().toISOString().split('T')[0]}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            required
+          />
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2 flex items-center gap-2">
-              <MapPin size={16} /> Sucursal *
-            </label>
-            <select value={formData.sucursalId}
-              onChange={e => setFormData({ ...formData, sucursalId: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required>
-              <option value="">Seleccionar sucursal</option>
-              {sucursales.map(suc => (
-                <option key={suc.id} value={suc.id}>{suc.nombre} - {suc.departamento}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2 flex items-center gap-2">
-              <Car size={16} /> Vehículo *
-            </label>
-            <select value={formData.patente}
-              onChange={e => setFormData({ ...formData, patente: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required>
-              <option value="">Seleccionar vehículo</option>
-              {/* ✅ usa patente como key y value, no id */}
-              {vehiculos.map(veh => (
-                <option key={veh.patente} value={veh.patente}>
-                  {veh.marca} {veh.modelo} - {veh.patente}
-                </option>
-              ))}
-            </select>
-            <button type="button"
-              onClick={() => window.location.href = '/dashboard/citas'}
-              className="text-sm text-blue-600 mt-1 hover:underline">
-              + Agregar nuevo vehículo
-            </button>
-          </div>
-
-          <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2 flex items-center gap-2">
-              <Calendar size={16} /> Fecha *
-            </label>
-            <input type="date" value={formData.fecha}
-              onChange={e => setFormData({ ...formData, fecha: e.target.value })}
-              min={new Date().toISOString().split('T')[0]}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required />
-          </div>
-
-          <div className="mb-4">
-            <label className="block text-gray-700 text-sm font-bold mb-2 flex items-center gap-2">
-              <Clock size={16} /> Hora (9:00 - 19:00) *
-            </label>
-            <select value={formData.hora}
-              onChange={e => setFormData({ ...formData, hora: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              required>
-              <option value="">Seleccionar hora</option>
-              {horasDisponibles.map(hora => <option key={hora} value={hora}>{hora}</option>)}
-            </select>
-          </div>
-
-          <div className="mb-6">
-            <label className="block text-gray-700 text-sm font-bold mb-2 flex items-center gap-2">
-              <Wrench size={16} /> Servicios *
-            </label>
-            <div className="space-y-2 max-h-48 overflow-y-auto border rounded-lg p-2">
-              {servicios.filter(s => s.estado === 'ACTIVO').map(serv => (
-                <label key={serv.id} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
-                  <input type="checkbox"
-                    checked={formData.serviciosIds.includes(serv.id)}
-                    onChange={() => toggleServicio(serv.id)}
-                    className="rounded border-gray-300 text-blue-700 focus:ring-blue-500" />
-                  <span className="flex-1">{serv.nombre}</span>
-                  <span className="text-sm text-gray-500">${serv.precioBase.toFixed(2)}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <button type="submit" disabled={loading}
-            className="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-2 px-4 rounded-lg transition disabled:opacity-50">
-            {loading ? 'Agendando...' : 'Agendar Cita'}
-          </button>
-        </form>
+        <div>
+          <label className="mb-1 flex items-center gap-2 text-sm font-bold text-gray-700">
+            <Clock size={16} /> Hora *
+          </label>
+          <select
+            value={formData.hora}
+            onChange={(e) => setFormData({ ...formData, hora: e.target.value })}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            disabled={!formData.fecha || horasDisponibles.length === 0}
+            required
+          >
+            <option value="">Seleccionar hora</option>
+            {horasDisponibles.map((hora) => (
+              <option key={hora} value={hora}>
+                {hora}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
-    </div>
+
+      <div>
+        <label className="mb-1 flex items-center gap-2 text-sm font-bold text-gray-700">
+          <Wrench size={16} /> Servicios *
+        </label>
+        <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg border border-gray-200 p-2">
+          {serviciosActivos.length === 0 ? (
+            <p className="p-2 text-sm text-gray-500">No hay servicios activos.</p>
+          ) : (
+            serviciosActivos.map((servicio) => (
+              <label
+                key={servicio.id}
+                className="flex cursor-pointer items-center gap-2 rounded p-2 hover:bg-gray-50"
+              >
+                <input
+                  type="checkbox"
+                  checked={formData.serviciosIds.includes(servicio.id)}
+                  onChange={() => toggleServicio(servicio.id)}
+                  className="rounded border-gray-300 text-blue-700 focus:ring-blue-500"
+                />
+                <span className="min-w-0 flex-1 text-sm">{servicio.nombre}</span>
+                <span className="text-sm font-semibold text-blue-700">${servicio.precioBase.toFixed(2)}</span>
+              </label>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Cancelar
+        </button>
+        <button
+          type="submit"
+          disabled={loading || faltanDatosBase}
+          className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {loading ? 'Agendando...' : 'Agendar cita'}
+        </button>
+      </div>
+    </form>
   );
 }

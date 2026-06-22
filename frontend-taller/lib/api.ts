@@ -21,11 +21,24 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const requestUrl = String(error.config?.url || '');
+    const isAuthRequest = requestUrl.includes('/auth/login') || requestUrl.includes('/auth/register');
+
+    if (error.response?.status === 401 && !isAuthRequest) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/login';
+      if (window.location.pathname !== '/login') {
+        window.location.replace('/login');
+      }
     }
+    if (error.response?.status === 403) {
+
+  console.error(
+    error.response?.data?.message ||
+    'No tienes permisos para realizar esta acción.'
+  );
+
+}
     return Promise.reject(error);
   }
 );
@@ -49,8 +62,10 @@ export const notificacionApi = {
 export const usuarioApi = {
   getAll:        ()                          => api.get('/usuarios'),
   getById:       (id: number)                => api.get(`/usuarios/${id}`),
+  getMe:         ()                          => api.get('/usuarios/me'),
   buscarPorEmail:(email: string)             => api.get(`/usuarios/buscar?email=${email}`),
   update:        (id: number, data: any)     => api.put(`/usuarios/${id}`, data),
+  updateMe:      (data: { nombre: string; apellido: string }) => api.put('/usuarios/me', data),
   desbloquear:   (id: number)                => api.patch(`/usuarios/${id}/desbloquear`),
   cambiarRol:    (id: number, data: { nuevoRol: string; sucursalId?: number }) =>
     api.patch(`/usuarios/${id}/cambiar-rol`, data),

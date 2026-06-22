@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { ordenApi, servicioApi, repuestoApi } from '@/lib/api';
+import { useCallback, useEffect, useState } from 'react';
+import { ordenApi } from '@/lib/api';
 import { useMecanicoId } from '@/hooks/useClienteId';
-import { OrdenTrabajo, Servicio, Repuesto } from '@/types';
-import { Wrench, Package, CheckCircle, DollarSign, Clock, AlertCircle } from 'lucide-react';
+import { OrdenTrabajo } from '@/types';
+import { Wrench, Package, CheckCircle, DollarSign } from 'lucide-react';
 
 export default function MecanicoOrdenesPage() {
   const { mecanicoId, sucursalId, loading: loadingMec } = useMecanicoId();
@@ -12,6 +12,7 @@ export default function MecanicoOrdenesPage() {
   const [ordenesPendientes, setOrdenesPendientes] = useState<OrdenTrabajo[]>([]);
   const [ordenes, setOrdenes] = useState<OrdenTrabajo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [selectedOrden, setSelectedOrden] = useState<OrdenTrabajo | null>(null);
 
   const [showPresupuesto, setShowPresupuesto] = useState(false);
@@ -19,14 +20,11 @@ export default function MecanicoOrdenesPage() {
   const [fechaEstimada, setFechaEstimada] = useState('');
   const [comentarioPresupuesto, setComentarioPresupuesto] = useState('');
 
-  useEffect(() => {
-    if (mecanicoId && sucursalId) fetchData();
-  }, [mecanicoId, sucursalId]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     if (!mecanicoId || !sucursalId) return;
     try {
       setLoading(true);
+      setError('');
       const [ordenesRes, pendientesRes] = await Promise.all([
         ordenApi.getByMecanico(mecanicoId),
         ordenApi.getPendientes(sucursalId),
@@ -38,17 +36,32 @@ export default function MecanicoOrdenesPage() {
       setOrdenesPendientes(pendientesRes.data);
     } catch (err) {
       console.error('Error:', err);
+      setError('No se pudieron cargar las ordenes del mecanico.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [mecanicoId, sucursalId]);
+
+  useEffect(() => {
+    if (loadingMec) return;
+    if (!mecanicoId || !sucursalId) {
+      setOrdenes([]);
+      setOrdenesPendientes([]);
+      setSelectedOrden(null);
+      setLoading(false);
+      setError('No se encontro un perfil de mecanico o una sucursal asignada para esta cuenta.');
+      return;
+    }
+
+    void fetchData();
+  }, [mecanicoId, sucursalId, loadingMec, fetchData]);
 
   const handleAceptarOrden = async (ordenId: number) => {
     if (!mecanicoId) return;
     try {
       await ordenApi.asignarMecanico(ordenId, mecanicoId);
       alert('Orden aceptada. Ahora aparece en "Mis Órdenes".');
-      fetchData();
+      void fetchData();
     } catch (err: any) {
       alert(err.response?.data?.message || 'Error al aceptar la orden');
     }
@@ -70,7 +83,7 @@ export default function MecanicoOrdenesPage() {
       setPresupuestoTotal('');
       setFechaEstimada('');
       setComentarioPresupuesto('');
-      fetchData();
+      void fetchData();
     } catch (err: any) {
       alert(err.response?.data?.message || 'Error al enviar presupuesto');
     }
@@ -82,7 +95,7 @@ export default function MecanicoOrdenesPage() {
     try {
       await ordenApi.marcarCompletada(ordenId);
       alert('Orden completada. El cliente fue notificado para proceder al pago.');
-      fetchData();
+      void fetchData();
       setSelectedOrden(null);
     } catch (err: any) {
       alert(err.response?.data?.message || 'Error al completar orden');
@@ -107,7 +120,12 @@ export default function MecanicoOrdenesPage() {
   }
 
   return (
-    <div className="flex gap-6 h-full">
+    <div className="space-y-4">
+      {error && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">{error}</div>
+      )}
+
+      <div className="flex gap-6 h-full">
       {/* Lista de órdenes */}
       <div className="w-1/3 space-y-3">
         <div className="flex gap-2 mb-4 border-b">
@@ -305,6 +323,7 @@ export default function MecanicoOrdenesPage() {
             )}
           </div>
         )}
+      </div>
       </div>
     </div>
   );

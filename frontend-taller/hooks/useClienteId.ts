@@ -10,12 +10,22 @@ export function useClienteId() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || user.rol !== 'CLIENTE') {
+      setClienteId(null);
+      setLoading(false);
+      return;
+    }
+    if (user.clienteId) {
+      setClienteId(user.clienteId);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     clienteApi.getByUsuarioId(user.id)
       .then(res => setClienteId(res.data.id))
       .catch(() => setClienteId(null))
       .finally(() => setLoading(false));
-  }, [user?.id]);
+  }, [user?.id, user?.rol, user?.clienteId]);
 
   return { clienteId, loading };
 }
@@ -27,7 +37,19 @@ export function useMecanicoId() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || user.rol !== 'MECANICO') {
+      setMecanicoId(null);
+      setSucursalId(null);
+      setLoading(false);
+      return;
+    }
+    if (user.mecanicoId) {
+      setMecanicoId(user.mecanicoId);
+      setSucursalId(user.sucursalId ?? null);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     mecanicoApi.getByUsuarioId(user.id)
       .then(res => {
         setMecanicoId(res.data.id);
@@ -35,7 +57,7 @@ export function useMecanicoId() {
       })
       .catch(() => { setMecanicoId(null); setSucursalId(null); })
       .finally(() => setLoading(false));
-  }, [user?.id]);
+  }, [user?.id, user?.rol, user?.mecanicoId, user?.sucursalId]);
 
   return { mecanicoId, sucursalId, loading };
 }

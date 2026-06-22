@@ -18,7 +18,7 @@ export default function DashboardLayout({
 
   useEffect(() => {
     if (!token || !user) {
-      router.push('/login');
+      router.replace('/login');
     }
   }, [token, user, router]);
 
