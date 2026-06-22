@@ -21,11 +21,24 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const requestUrl = String(error.config?.url || '');
+    const isAuthRequest = requestUrl.includes('/auth/login') || requestUrl.includes('/auth/register');
+
+    if (error.response?.status === 401 && !isAuthRequest) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/login';
+      if (window.location.pathname !== '/login') {
+        window.location.replace('/login');
+      }
     }
+    if (error.response?.status === 403) {
+
+  console.error(
+    error.response?.data?.message ||
+    'No tienes permisos para realizar esta acción.'
+  );
+
+}
     return Promise.reject(error);
   }
 );
@@ -49,10 +62,11 @@ export const notificacionApi = {
 export const usuarioApi = {
   getAll:        ()                          => api.get('/usuarios'),
   getById:       (id: number)                => api.get(`/usuarios/${id}`),
+  getMe:         ()                          => api.get('/usuarios/me'),
   buscarPorEmail:(email: string)             => api.get(`/usuarios/buscar?email=${email}`),
   update:        (id: number, data: any)     => api.put(`/usuarios/${id}`, data),
+  updateMe:      (data: { nombre: string; apellido: string }) => api.put('/usuarios/me', data),
   desbloquear:   (id: number)                => api.patch(`/usuarios/${id}/desbloquear`),
-  // ✅ NUEVO: cambiar rol (CLIENTE → MECANICO o viceversa)
   cambiarRol:    (id: number, data: { nuevoRol: string; sucursalId?: number }) =>
     api.patch(`/usuarios/${id}/cambiar-rol`, data),
 };
@@ -70,7 +84,6 @@ export const sucursalApi = {
 export const clienteApi = {
   getAll:  ()                      => api.get('/clientes'),
   getById: (id: number)            => api.get(`/clientes/${id}`),
-  // ✅ Obtener cliente por usuarioId (para resolver clienteId del usuario logueado)
   getByUsuarioId: (usuarioId: number) => api.get(`/clientes/usuario/${usuarioId}`),
   create:  (data: any)             => api.post('/clientes', data),
   update:  (id: number, data: any) => api.put(`/clientes/${id}`, data),
@@ -82,7 +95,6 @@ export const mecanicoApi = {
   getAll:        ()                  => api.get('/mecanicos'),
   getById:       (id: number)        => api.get(`/mecanicos/${id}`),
   getBySucursal: (sucursalId: number)=> api.get(`/mecanicos/sucursal/${sucursalId}`),
-  // ✅ NUEVO: obtener mecánico por usuarioId
   getByUsuarioId:(usuarioId: number) => api.get(`/mecanicos/usuario/${usuarioId}`),
   update:        (id: number, data: any) => api.put(`/mecanicos/${id}`, data),
   delete:        (id: number)        => api.delete(`/mecanicos/${id}`),
@@ -121,7 +133,6 @@ export const proveedorApi = {
 export const repuestoApi = {
   getAll:          ()                    => api.get('/repuestos'),
   getById:         (id: number)          => api.get(`/repuestos/${id}`),
-  // ✅ NUEVO: filtrar por categoría y nombre
   getByCategoria:  (categoria: string)   => api.get(`/repuestos/categoria/${categoria}`),
   buscarPorNombre: (nombre: string)      => api.get(`/repuestos/buscar?nombre=${nombre}`),
   create:          (data: any)           => api.post('/repuestos', data),
@@ -133,7 +144,6 @@ export const repuestoApi = {
 export const inventarioApi = {
   getBySucursal: (sucursalId: number)    => api.get(`/inventario/sucursal/${sucursalId}`),
   getById:       (id: number)            => api.get(`/inventario/${id}`),
-  // ✅ NUEVO: filtro combinable por sucursal + categoria + nombre
   filtrar: (sucursalId: number, categoria?: string, nombre?: string) => {
     const params = new URLSearchParams();
     if (categoria) params.append('categoria', categoria);
@@ -154,15 +164,17 @@ export const horasApi = {
 
 // ============ FACTURAS ============
 export const facturaApi = {
-  getAll:     ()                => api.get('/facturas'),
-  getById:    (id: number)      => api.get(`/facturas/${id}`),
-  getByOrden: (ordenId: number) => api.get(`/facturas/orden/${ordenId}`),
-  pagar:      (data: { ordenId: number; metodoPago: 'EFECTIVO' | 'TARJETA' | 'STRIPE' }) =>
+  getAll:       ()                  => api.get('/facturas'),
+  getById:      (id: number)        => api.get(`/facturas/${id}`),
+  getByOrden:   (ordenId: number)   => api.get(`/facturas/orden/${ordenId}`),
+  getByCliente: (clienteId: number) => api.get(`/facturas/cliente/${clienteId}`),
+  pagar:        (data: { ordenId: number; metodoPago: 'EFECTIVO' | 'TARJETA' | 'STRIPE' }) =>
     api.post('/facturas/pagar', data),
 };
 
 // ============ PAGOS STRIPE ============
 export const stripeApi = {
+  getConfig: () => api.get('/pagos/stripe/config'),
   pagar: (data: { facturaId: number; token: string }) => api.post('/pagos/stripe', data),
 };
 
@@ -177,15 +189,11 @@ export const citaApi = {
       : `/citas/sucursal/${sucursalId}`;
     return api.get(url);
   },
-  // ✅ NUEVO: citas sin mecánico (para que el mecánico las vea y acepte)
-  getPendientes:  ()                                => api.get('/citas/pendientes'),
+  getPendientes:  (sucursalId?: number)             => api.get('/citas/pendientes', { params: sucursalId ? { sucursalId } : {} }),
   create:         (data: any)                       => api.post('/citas', data),
-  // ✅ NUEVO: mecánico acepta una cita
   aceptar:        (id: number, mecanicoId: number)  => api.patch(`/citas/${id}/aceptar?mecanicoId=${mecanicoId}`),
-  // ✅ NUEVO: mecánico propone nueva fecha
   reprogramar:    (id: number, data: { nuevaFecha: string; nuevaHora: string }) =>
     api.patch(`/citas/${id}/reprogramar`, data),
-  // ✅ NUEVO: cliente acepta reprogramación
   aceptarReprogramacion: (id: number)              => api.patch(`/citas/${id}/aceptar-reprogramacion`),
   confirmar:      (id: number)                      => api.patch(`/citas/${id}/confirmar`),
   cancelar:       (id: number)                      => api.delete(`/citas/${id}`),
@@ -199,6 +207,9 @@ export const ordenApi = {
   getByCliente:         (clienteId: number)   => api.get(`/ordenes/cliente/${clienteId}`),
   getByMecanico:        (mecanicoId: number)  => api.get(`/ordenes/mecanico/${mecanicoId}`),
   getByVehiculo:        (patente: string)     => api.get(`/ordenes/vehiculo/${patente}`),
+  getPendientes:        (sucursalId?: number) => api.get('/ordenes/pendientes', { params: sucursalId ? { sucursalId } : {} }),
+  asignarMecanico:      (id: number, mecanicoId: number) =>
+    api.patch(`/ordenes/${id}/asignar-mecanico`, null, { params: { mecanicoId } }),
   cambiarEstado:        (id: number, estado: string) =>
     api.patch(`/ordenes/${id}/estado?estado=${estado}`),
   enviarPresupuesto:    (id: number, data: any) => api.patch(`/ordenes/${id}/presupuesto`, data),

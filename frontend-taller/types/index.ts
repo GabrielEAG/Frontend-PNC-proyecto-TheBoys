@@ -5,6 +5,9 @@ export interface Usuario {
   apellido?: string;
   rol: 'ADMIN' | 'MECANICO' | 'CLIENTE';
   bloqueado?: boolean;
+  clienteId?: number | null;
+  mecanicoId?: number | null;
+  sucursalId?: number | null;
 }
 
 export interface AuthResponse {
@@ -14,6 +17,9 @@ export interface AuthResponse {
   nombre: string;
   apellido?: string;
   id?: number;
+  clienteId?: number | null;
+  mecanicoId?: number | null;
+  sucursalId?: number | null;
 }
 
 export interface RegisterRequest {
@@ -31,13 +37,12 @@ export interface LoginRequest {
   password: string;
 }
 
-// ✅ CORREGIDO: campos que devuelve el backend (tipo, fechaCreacion — no titulo/fecha)
 export interface Notificacion {
   id: number;
   mensaje: string;
   leida: boolean;
   fechaCreacion: string;
-  tipo: string; // PRESUPUESTO, ORDEN_LISTA, CITA_REPROGRAMADA, etc.
+  tipo: string;
   referenciaId?: number;
 }
 
@@ -48,6 +53,7 @@ export interface Cliente {
   apellido?: string;
   email?: string;
   telefono: string;
+  direccion?: string | null;
 }
 
 export interface Mecanico {
@@ -92,7 +98,6 @@ export interface Proveedor {
   contacto: string;
 }
 
-// ✅ CORREGIDO: agrega categoria y descripcion
 export interface Repuesto {
   id: number;
   nombre: string;
@@ -103,7 +108,6 @@ export interface Repuesto {
   descripcion?: string;
 }
 
-// ✅ CORREGIDO: agrega repuestoId, sucursalId, categoria
 export interface Inventario {
   id: number;
   sucursalId: number;
@@ -139,6 +143,8 @@ export interface RegistroHoras {
 export interface Factura {
   id: number;
   ordenId: number;
+  vehiculoPatente: string;
+  fechaOrden: string;
   subtotal: number;
   impuestos: number;
   total: number;
@@ -146,7 +152,6 @@ export interface Factura {
   metodoPago: 'EFECTIVO' | 'TARJETA' | 'STRIPE' | null;
 }
 
-// ✅ CORREGIDO: agrega REPROGRAMADA
 export interface Cita {
   id: number;
   clienteNombre: string;
@@ -174,7 +179,6 @@ export interface OrdenRepuestoRequest {
   precioAplicado: number;
 }
 
-// ✅ CORREGIDO: clienteId (no clientId)
 export interface OrdenTrabajoRequest {
   patente: string;
   clienteId: number;
@@ -199,7 +203,6 @@ export interface OrdenRepuestoResponse {
   precioAplicado: number;
 }
 
-// ✅ CORREGIDO: agrega presupuestoTotal, sucursalId, sucursalNombre, fechaFinalizacionEstimada
 export interface OrdenTrabajoResponse {
   id: number;
   patente: string;
@@ -220,7 +223,6 @@ export interface OrdenTrabajoResponse {
 
 export type OrdenTrabajo = OrdenTrabajoResponse;
 
-// ✅ NUEVO: tipos para reportes
 export interface ReporteMecanicoHoras {
   mecanicoId: number;
   nombre: string;

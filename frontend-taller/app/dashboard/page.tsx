@@ -14,16 +14,16 @@ export default function DashboardPage() {
     if (user) {
       switch (user.rol) {
         case 'ADMIN':
-          router.push('/dashboard/admin-reportes');
+          router.replace('/dashboard/admin-reportes')
           break;
         case 'MECANICO':
-          router.push('/dashboard/mecanico-citas');
+          router.replace('/dashboard/mecanico-citas')
           break;
         case 'CLIENTE':
-          router.push('/dashboard/mis-ordenes');
+          router.replace('/dashboard/mis-ordenes')
           break;
         default:
-          router.push('/dashboard');
+          router.replace('/dashboard')
       }
     }
   }, [user, router]);

@@ -1,40 +1,52 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { citaApi, sucursalApi, vehiculoApi, servicioApi, ordenApi } from '@/lib/api';
 import { useClienteId } from '@/hooks/useClienteId';
 import { Cita, Sucursal, Vehiculo, Servicio } from '@/types';
-import { Calendar as CalendarIcon, Clock, MapPin, X, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, X, CheckCircle, RefreshCw, Car } from 'lucide-react';
+import Modal from '@/components/ui/Modal';
+import CitaForm, { CitaFormData } from '@/components/forms/CitaForm';
+import VehiculoForm, { VehiculoFormData } from '@/components/forms/VehiculoForm';
+import { useCallback } from 'react';
+
+type ApiError = { response?: { data?: { message?: string } } };
+
+const getErrorMessage = (error: unknown, fallback: string) =>
+  (error as ApiError).response?.data?.message || fallback;
 
 export default function CitasPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const servicioPreseleccionado = searchParams.get('servicio');
-  // ✅ ID real del cliente (no hardcodeado)
+  const servicioParam = searchParams.get('servicio');
+  const servicioPreseleccionadoId = servicioParam && Number.isFinite(Number(servicioParam))
+    ? Number(servicioParam)
+    : undefined;
   const { clienteId, loading: loadingCliente } = useClienteId();
 
   const [citas, setCitas] = useState<Cita[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
+  const [error, setError] = useState('');
+  const [showCitaForm, setShowCitaForm] = useState(false);
+  const [showVehiculoForm, setShowVehiculoForm] = useState(false);
   const [sucursales, setSucursales] = useState<Sucursal[]>([]);
   const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
   const [servicios, setServicios] = useState<Servicio[]>([]);
-  const [formData, setFormData] = useState({
-    sucursalId: '', patente: '', fecha: '', hora: '', serviciosIds: [] as number[],
-  });
 
-  useEffect(() => { if (clienteId) fetchData(); }, [clienteId]);
+  const serviciosActivos = useMemo(
+    () => servicios.filter((servicio) => servicio.estado === 'ACTIVO'),
+    [servicios]
+  );
 
-  useEffect(() => {
-    if (servicioPreseleccionado && servicios.length > 0) {
-      setFormData(prev => ({ ...prev, serviciosIds: [parseInt(servicioPreseleccionado)] }));
-      setShowForm(true);
+  const fetchData = useCallback(async () => {
+    if (!clienteId) {
+      setLoading(false);
+      return;
     }
-  }, [servicioPreseleccionado, servicios]);
 
-  const fetchData = async () => {
-    if (!clienteId) return;
+    setLoading(true);
+    setError('');
     try {
       const [sucRes, vehRes, servRes, citasRes] = await Promise.all([
         sucursalApi.getAll(),
@@ -46,214 +58,269 @@ export default function CitasPage() {
       setVehiculos(vehRes.data);
       setServicios(servRes.data);
       setCitas(citasRes.data);
-    } catch (err) { console.error(err); }
-    finally { setLoading(false); }
+    } catch (err) {
+      setError(getErrorMessage(err, 'Error al cargar tus citas'));
+    } finally {
+      setLoading(false);
+    }
+  }, [clienteId]);
+
+  useEffect(() => {
+
+  if (!loadingCliente && clienteId) {
+    void fetchData();
+  }
+
+}, [clienteId, loadingCliente, fetchData]);
+
+  useEffect(() => {
+    if (servicioPreseleccionadoId && servicios.length > 0) {
+      setShowCitaForm(true);
+    }
+  }, [servicioPreseleccionadoId, servicios.length]);
+
+  const closeCitaForm = () => {
+    setShowCitaForm(false);
+    if (servicioParam) router.replace('/dashboard/citas');
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.sucursalId || !formData.patente || !formData.fecha || !formData.hora) {
-      alert('Completa todos los campos obligatorios'); return;
+  const handleSubmitCita = async (data: CitaFormData) => {
+    if (!clienteId) {
+      alert('No se pudo identificar tu perfil de cliente');
+      return;
     }
-    if (formData.serviciosIds.length === 0) { alert('Selecciona al menos un servicio'); return; }
+
     try {
-      // 1. Crear la cita con los servicios seleccionados
+      const sucursalId = Number(data.sucursalId);
+      const hora = data.hora.length === 5 ? `${data.hora}:00` : data.hora;
+
       await citaApi.create({
         clienteId,
-        sucursalId: parseInt(formData.sucursalId),
-        fecha: formData.fecha,
-        hora: formData.hora + ':00',
-        servicioIds: formData.serviciosIds,
+        sucursalId,
+        fecha: data.fecha,
+        hora,
+        servicioIds: data.serviciosIds,
       });
-      // 2. Crear la orden de trabajo
-      // ✅ clienteId (no clientId)
+
       await ordenApi.create({
-        patente: formData.patente,
+        patente: data.patente,
         clienteId,
-        sucursalId: parseInt(formData.sucursalId),
+        sucursalId,
         tipoOrden: 'ESTANDAR',
-        servicios: formData.serviciosIds.map(sid => ({
-          servicioId: sid,
-          precioAplicado: servicios.find(s => s.id === sid)?.precioBase || 0,
+        servicios: data.serviciosIds.map((servicioId) => ({
+          servicioId,
+          precioAplicado: servicios.find((servicio) => servicio.id === servicioId)?.precioBase || 0,
         })),
         repuestos: [],
       });
-      alert('¡Cita y orden creadas! Espera a que un mecánico la acepte.');
-      setShowForm(false);
-      setFormData({ sucursalId: '', patente: '', fecha: '', hora: '', serviciosIds: [] });
-      fetchData();
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Error al crear cita');
+
+      await fetchData();
+      alert('Cita y orden creadas. Espera a que un mecanico la acepte.');
+    } catch (err) {
+      alert(getErrorMessage(err, 'Error al crear cita'));
+      throw err;
+    }
+  };
+
+  const handleSubmitVehiculo = async (data: VehiculoFormData) => {
+    try {
+      await vehiculoApi.create(data);
+      await fetchData();
+      alert('Vehiculo registrado correctamente.');
+    } catch (err) {
+      const mensaje = getErrorMessage(
+    err,
+    'Error al registrar vehículo'
+);
+alert(mensaje);
+      throw err;
     }
   };
 
   const handleCancelar = async (citaId: number) => {
-    if (confirm('¿Cancelar esta cita?')) {
-      try { await citaApi.cancelar(citaId); fetchData(); }
-      catch (err: any) { alert(err.response?.data?.message || 'Error al cancelar'); }
+    if (!confirm('Cancelar esta cita?')) return;
+    try {
+      await citaApi.cancelar(citaId);
+      await fetchData();
+    } catch (err) {
+      alert(getErrorMessage(err, 'Error al cancelar'));
     }
   };
 
-  // ✅ NUEVO: cliente acepta reprogramación propuesta por mecánico
   const handleAceptarReprogramacion = async (citaId: number) => {
     try {
       await citaApi.aceptarReprogramacion(citaId);
-      fetchData();
-      alert('Reprogramación aceptada.');
-    } catch (err: any) { alert(err.response?.data?.message || 'Error'); }
+      await fetchData();
+      alert('Reprogramacion aceptada.');
+    } catch (err) {
+      alert(getErrorMessage(err, 'Error al aceptar reprogramacion'));
+    }
   };
 
   const getEstadoBadge = (estado: string) => {
     const clases: Record<string, string> = {
-      PROGRAMADA:   'bg-yellow-100 text-yellow-800',
-      CONFIRMADA:   'bg-green-100 text-green-800',
+      PROGRAMADA: 'bg-yellow-100 text-yellow-800',
+      CONFIRMADA: 'bg-green-100 text-green-800',
       REPROGRAMADA: 'bg-orange-100 text-orange-800',
-      COMPLETADA:   'bg-gray-100 text-gray-800',
-      CANCELADA:    'bg-red-100 text-red-800',
+      COMPLETADA: 'bg-gray-100 text-gray-800',
+      CANCELADA: 'bg-red-100 text-red-800',
     };
     return clases[estado] || 'bg-gray-100 text-gray-800';
   };
 
-  if (loadingCliente || loading) return (
-    <div className="flex justify-center items-center h-64">
-      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700"></div>
-    </div>
-  );
+  if (loadingCliente || loading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-blue-700" />
+      </div>
+    );
+  }
+
+  if (!clienteId) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-red-700">
+        No se pudo cargar tu perfil de cliente. Cierra sesion e inicia sesion nuevamente.
+      </div>
+    );
+  }
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Mis Citas</h1>
-        <button onClick={() => setShowForm(true)}
-          className="bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg">
-          + Nueva Cita
-        </button>
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Mis Citas</h1>
+          <p className="text-sm text-gray-500">Agenda y revisa el estado de tus visitas al taller.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setShowVehiculoForm(true)}
+            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            <Car size={16} /> Agregar vehiculo
+          </button>
+          <button
+            onClick={() => setShowCitaForm(true)}
+            className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800"
+          >
+            Nueva cita
+          </button>
+        </div>
       </div>
+
+      {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">{error}</div>}
+
+      {vehiculos.length === 0 && (
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-800">
+          <p className="font-medium">Aun no tienes vehiculos registrados.</p>
+          <p className="text-sm">Agrega tu primer vehiculo para poder crear una cita.</p>
+        </div>
+      )}
+
+      {sucursales.length === 0 && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-800">
+          No hay sucursales disponibles. Pide al administrador que registre al menos una sucursal.
+        </div>
+      )}
+
+      {serviciosActivos.length === 0 && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-800">
+          No hay servicios activos. Pide al administrador que active el catalogo de servicios.
+        </div>
+      )}
 
       <div className="space-y-4">
         {citas.length === 0 ? (
-          <div className="bg-white rounded-lg shadow-md p-12 text-center">
-            <CalendarIcon className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+          <div className="rounded-lg bg-white p-12 text-center shadow-md">
+            <CalendarIcon className="mx-auto mb-4 h-16 w-16 text-gray-400" />
             <p className="text-gray-500">No tienes citas agendadas</p>
           </div>
-        ) : citas.map(cita => (
-          <div key={cita.id} className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex justify-between items-start">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${getEstadoBadge(cita.estado)}`}>
-                    {cita.estado}
-                  </span>
-                  {cita.mecanicoNombre && <span className="text-sm text-gray-500">Mecánico: {cita.mecanicoNombre}</span>}
-                </div>
-                <p className="flex items-center gap-2 text-gray-600"><CalendarIcon size={16} />{cita.fecha}</p>
-                <p className="flex items-center gap-2 text-gray-600"><Clock size={16} />{cita.hora}</p>
-                <p className="flex items-center gap-2 text-gray-600"><MapPin size={16} />{cita.sucursalNombre}</p>
-                {cita.servicios && cita.servicios.length > 0 && (
-                  <p className="text-sm text-gray-500">Servicios: {cita.servicios.join(', ')}</p>
-                )}
-                {/* ✅ NUEVO: mostrar propuesta de reprogramación */}
-                {cita.estado === 'REPROGRAMADA' && cita.nuevaFechaPropuesta && (
-                  <div className="mt-2 bg-orange-50 border border-orange-200 rounded p-2 text-sm">
-                    <p className="text-orange-800 font-medium flex items-center gap-1">
-                      <RefreshCw size={14} /> El mecánico propone nueva fecha:
-                    </p>
-                    <p className="text-orange-700">{cita.nuevaFechaPropuesta} a las {cita.nuevaHoraPropuesta}</p>
+        ) : (
+          citas.map((cita) => (
+            <div key={cita.id} className="rounded-lg bg-white p-6 shadow-md">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`rounded-full px-2 py-1 text-xs font-medium ${getEstadoBadge(cita.estado)}`}>
+                      {cita.estado}
+                    </span>
+                    {cita.mecanicoNombre && (
+                      <span className="text-sm text-gray-500">Mecanico: {cita.mecanicoNombre}</span>
+                    )}
                   </div>
-                )}
-              </div>
-              <div className="flex gap-2">
-                {cita.estado === 'REPROGRAMADA' && (
-                  <button onClick={() => handleAceptarReprogramacion(cita.id)}
-                    className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm flex items-center gap-1">
-                    <CheckCircle size={14} /> Aceptar fecha
-                  </button>
-                )}
-                {(cita.estado === 'PROGRAMADA' || cita.estado === 'REPROGRAMADA') && (
-                  <button onClick={() => handleCancelar(cita.id)}
-                    className="text-red-600 hover:text-red-700" title="Cancelar">
-                    <X size={20} />
-                  </button>
-                )}
+                  <p className="flex items-center gap-2 text-gray-600">
+                    <CalendarIcon size={16} />
+                    {cita.fecha}
+                  </p>
+                  <p className="flex items-center gap-2 text-gray-600">
+                    <Clock size={16} />
+                    {cita.hora}
+                  </p>
+                  <p className="flex items-center gap-2 text-gray-600">
+                    <MapPin size={16} />
+                    {cita.sucursalNombre}
+                  </p>
+                  {cita.servicios && cita.servicios.length > 0 && (
+                    <p className="text-sm text-gray-500">Servicios: {cita.servicios.join(', ')}</p>
+                  )}
+                  {cita.estado === 'REPROGRAMADA' && cita.nuevaFechaPropuesta && (
+                    <div className="mt-2 rounded border border-orange-200 bg-orange-50 p-2 text-sm">
+                      <p className="flex items-center gap-1 font-medium text-orange-800">
+                        <RefreshCw size={14} /> El mecanico propone nueva fecha:
+                      </p>
+                      <p className="text-orange-700">
+                        {cita.nuevaFechaPropuesta} a las {cita.nuevaHoraPropuesta}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {cita.estado === 'REPROGRAMADA' && (
+                    <button
+                      onClick={() => handleAceptarReprogramacion(cita.id)}
+                      className="inline-flex items-center gap-1 rounded bg-green-600 px-3 py-1 text-sm text-white hover:bg-green-700"
+                    >
+                      <CheckCircle size={14} /> Aceptar fecha
+                    </button>
+                  )}
+                  {(cita.estado === 'PROGRAMADA' || cita.estado === 'REPROGRAMADA') && (
+                    <button
+                      onClick={() => handleCancelar(cita.id)}
+                      className="text-red-600 hover:text-red-700"
+                      title="Cancelar"
+                    >
+                      <X size={20} />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
 
-      {/* Modal nueva cita */}
-      {showForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg max-w-md w-full mx-4 max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold">Agendar Nueva Cita</h2>
-                <button onClick={() => setShowForm(false)}><X size={24} /></button>
-              </div>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-bold mb-1">Sucursal *</label>
-                  <select value={formData.sucursalId}
-                    onChange={e => setFormData({ ...formData, sucursalId: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg" required>
-                    <option value="">Seleccionar sucursal</option>
-                    {sucursales.map(s => <option key={s.id} value={s.id}>{s.nombre} - {s.departamento}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-bold mb-1">Vehículo *</label>
-                  <select value={formData.patente}
-                    onChange={e => setFormData({ ...formData, patente: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg" required>
-                    <option value="">Seleccionar vehículo</option>
-                    {vehiculos.map(v => <option key={v.patente} value={v.patente}>{v.marca} {v.modelo} - {v.patente}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-bold mb-1">Fecha *</label>
-                  <input type="date" value={formData.fecha}
-                    onChange={e => setFormData({ ...formData, fecha: e.target.value })}
-                    min={new Date().toISOString().split('T')[0]}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg" required />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold mb-1">Hora (9:00 - 19:00) *</label>
-                  <select value={formData.hora}
-                    onChange={e => setFormData({ ...formData, hora: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg" required>
-                    <option value="">Seleccionar hora</option>
-                    {Array.from({ length: 11 }, (_, i) => `${(9 + i).toString().padStart(2, '0')}:00`).map(h =>
-                      <option key={h} value={h}>{h}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-bold mb-1">Servicios *</label>
-                  <div className="space-y-2 max-h-40 overflow-y-auto border rounded-lg p-2">
-                    {servicios.filter(s => s.estado === 'ACTIVO').map(serv => (
-                      <label key={serv.id} className="flex items-center gap-2 p-1 hover:bg-gray-50 rounded cursor-pointer">
-                        <input type="checkbox"
-                          checked={formData.serviciosIds.includes(serv.id)}
-                          onChange={e => setFormData({
-                            ...formData,
-                            serviciosIds: e.target.checked
-                              ? [...formData.serviciosIds, serv.id]
-                              : formData.serviciosIds.filter(id => id !== serv.id),
-                          })} />
-                        <span className="flex-1 text-sm">{serv.nombre}</span>
-                        <span className="text-sm font-semibold text-blue-600">${serv.precioBase.toFixed(2)}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                <button type="submit"
-                  className="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-2 rounded-lg">
-                  Agendar Cita
-                </button>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
+      <Modal isOpen={showCitaForm} onClose={closeCitaForm} title="Agendar nueva cita" size="lg">
+        <CitaForm
+          key={servicioPreseleccionadoId ?? 'nueva-cita'}
+          sucursales={sucursales}
+          vehiculos={vehiculos}
+          servicios={servicios}
+          servicioPreseleccionado={servicioPreseleccionadoId}
+          onSubmit={handleSubmitCita}
+          onClose={closeCitaForm}
+          onAddVehiculo={() => {
+            setShowCitaForm(false);
+            setShowVehiculoForm(true);
+          }}
+        />
+      </Modal>
+
+      <Modal isOpen={showVehiculoForm} onClose={() => setShowVehiculoForm(false)} title="Registrar vehiculo" size="md">
+        <VehiculoForm
+          clienteId={clienteId}
+          onSubmit={handleSubmitVehiculo}
+          onClose={() => setShowVehiculoForm(false)}
+        />
+      </Modal>
     </div>
   );
 }

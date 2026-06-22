@@ -15,6 +15,7 @@ import {
   Building2,
   ClipboardList,
   Settings,
+  CreditCard,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -28,6 +29,7 @@ export default function Sidebar({ sidebarOpen, userRole }: SidebarProps) {
   const menuItems = {
     CLIENTE: [
       { name: 'Mis Órdenes', href: '/dashboard/mis-ordenes', icon: ClipboardList },
+      { name: 'Mis Facturas', href: '/dashboard/facturas', icon: CreditCard },
       { name: 'Catálogo', href: '/dashboard/catalogo', icon: Package },
       { name: 'Citas', href: '/dashboard/citas', icon: Calendar },
       { name: 'Notificaciones', href: '/dashboard/notificaciones', icon: Bell },

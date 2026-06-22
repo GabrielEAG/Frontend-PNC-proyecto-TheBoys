@@ -1,46 +1,72 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { ordenApi, servicioApi, repuestoApi } from '@/lib/api';
+import { useCallback, useEffect, useState } from 'react';
+import { ordenApi } from '@/lib/api';
 import { useMecanicoId } from '@/hooks/useClienteId';
-import { OrdenTrabajo, Servicio, Repuesto } from '@/types';
-import { Wrench, Package, CheckCircle, DollarSign, Clock, AlertCircle } from 'lucide-react';
+import { OrdenTrabajo } from '@/types';
+import { Wrench, Package, CheckCircle, DollarSign } from 'lucide-react';
 
 export default function MecanicoOrdenesPage() {
-  // ✅ Usa el ID real del mecánico
-  const { mecanicoId, loading: loadingMec } = useMecanicoId();
+  const { mecanicoId, sucursalId, loading: loadingMec } = useMecanicoId();
+  const [activeTab, setActiveTab] = useState<'disponibles' | 'misordenes'>('misordenes');
+  const [ordenesPendientes, setOrdenesPendientes] = useState<OrdenTrabajo[]>([]);
   const [ordenes, setOrdenes] = useState<OrdenTrabajo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [selectedOrden, setSelectedOrden] = useState<OrdenTrabajo | null>(null);
 
-  // Presupuesto
   const [showPresupuesto, setShowPresupuesto] = useState(false);
   const [presupuestoTotal, setPresupuestoTotal] = useState('');
   const [fechaEstimada, setFechaEstimada] = useState('');
   const [comentarioPresupuesto, setComentarioPresupuesto] = useState('');
 
-  useEffect(() => {
-    if (mecanicoId) fetchData();
-  }, [mecanicoId]);
-
-  const fetchData = async () => {
-    if (!mecanicoId) return;
+  const fetchData = useCallback(async () => {
+    if (!mecanicoId || !sucursalId) return;
     try {
-      // ✅ Usa endpoint por mecánico, no getAll()
-      const ordenesRes = await ordenApi.getByMecanico(mecanicoId);
-      // Solo las activas (no completadas ni canceladas)
+      setLoading(true);
+      setError('');
+      const [ordenesRes, pendientesRes] = await Promise.all([
+        ordenApi.getByMecanico(mecanicoId),
+        ordenApi.getPendientes(sucursalId),
+      ]);
       const activas = ordenesRes.data.filter(
         (o: OrdenTrabajo) => !['COMPLETADA', 'CANCELADA'].includes(o.estado)
       );
       setOrdenes(activas);
+      setOrdenesPendientes(pendientesRes.data);
     } catch (err) {
       console.error('Error:', err);
+      setError('No se pudieron cargar las ordenes del mecanico.');
     } finally {
       setLoading(false);
     }
+  }, [mecanicoId, sucursalId]);
+
+  useEffect(() => {
+    if (loadingMec) return;
+    if (!mecanicoId || !sucursalId) {
+      setOrdenes([]);
+      setOrdenesPendientes([]);
+      setSelectedOrden(null);
+      setLoading(false);
+      setError('No se encontro un perfil de mecanico o una sucursal asignada para esta cuenta.');
+      return;
+    }
+
+    void fetchData();
+  }, [mecanicoId, sucursalId, loadingMec, fetchData]);
+
+  const handleAceptarOrden = async (ordenId: number) => {
+    if (!mecanicoId) return;
+    try {
+      await ordenApi.asignarMecanico(ordenId, mecanicoId);
+      alert('Orden aceptada. Ahora aparece en "Mis Órdenes".');
+      void fetchData();
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Error al aceptar la orden');
+    }
   };
 
-  // ✅ Enviar presupuesto al cliente
   const handleEnviarPresupuesto = async () => {
     if (!selectedOrden || !presupuestoTotal) {
       alert('Ingresa el monto del presupuesto');
@@ -57,7 +83,7 @@ export default function MecanicoOrdenesPage() {
       setPresupuestoTotal('');
       setFechaEstimada('');
       setComentarioPresupuesto('');
-      fetchData();
+      void fetchData();
     } catch (err: any) {
       alert(err.response?.data?.message || 'Error al enviar presupuesto');
     }
@@ -69,7 +95,7 @@ export default function MecanicoOrdenesPage() {
     try {
       await ordenApi.marcarCompletada(ordenId);
       alert('Orden completada. El cliente fue notificado para proceder al pago.');
-      fetchData();
+      void fetchData();
       setSelectedOrden(null);
     } catch (err: any) {
       alert(err.response?.data?.message || 'Error al completar orden');
@@ -94,11 +120,48 @@ export default function MecanicoOrdenesPage() {
   }
 
   return (
-    <div className="flex gap-6 h-full">
+    <div className="space-y-4">
+      {error && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">{error}</div>
+      )}
+
+      <div className="flex gap-6 h-full">
       {/* Lista de órdenes */}
       <div className="w-1/3 space-y-3">
-        <h2 className="text-xl font-bold mb-4">Mis Órdenes Activas</h2>
-        {ordenes.length === 0 ? (
+        <div className="flex gap-2 mb-4 border-b">
+          <button onClick={() => setActiveTab('disponibles')}
+            className={`px-3 py-2 text-sm font-medium transition ${activeTab === 'disponibles' ? 'border-b-2 border-blue-700 text-blue-700' : 'text-gray-500'}`}>
+            Disponibles ({ordenesPendientes.length})
+          </button>
+          <button onClick={() => setActiveTab('misordenes')}
+            className={`px-3 py-2 text-sm font-medium transition ${activeTab === 'misordenes' ? 'border-b-2 border-blue-700 text-blue-700' : 'text-gray-500'}`}>
+            Mis Órdenes ({ordenes.length})
+          </button>
+        </div>
+
+        {activeTab === 'disponibles' && (
+          ordenesPendientes.length === 0 ? (
+            <div className="bg-white rounded-lg shadow-md p-8 text-center">
+              <Wrench className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+              <p className="text-gray-500">No hay órdenes disponibles para aceptar</p>
+            </div>
+          ) : ordenesPendientes.map(orden => (
+            <div key={orden.id} className="bg-white rounded-lg shadow-md p-4">
+              <p className="font-semibold">Orden #{orden.id}</p>
+              <p className="text-sm text-gray-500">{orden.clienteNombre}</p>
+              <p className="text-sm text-gray-500">Vehículo: {orden.patente}</p>
+              <button
+                onClick={() => handleAceptarOrden(orden.id)}
+                className="mt-2 w-full bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg text-sm flex items-center justify-center gap-1"
+              >
+                <CheckCircle size={14} /> Aceptar orden
+              </button>
+            </div>
+          ))
+        )}
+
+        {activeTab === 'misordenes' && (
+        ordenes.length === 0 ? (
           <div className="bg-white rounded-lg shadow-md p-8 text-center">
             <Wrench className="h-12 w-12 text-gray-400 mx-auto mb-3" />
             <p className="text-gray-500">No tienes órdenes activas</p>
@@ -122,7 +185,8 @@ export default function MecanicoOrdenesPage() {
               </span>
             </div>
           </div>
-        ))}
+        ))
+        )}
       </div>
 
       {/* Detalle de la orden seleccionada */}
@@ -259,6 +323,7 @@ export default function MecanicoOrdenesPage() {
             )}
           </div>
         )}
+      </div>
       </div>
     </div>
   );

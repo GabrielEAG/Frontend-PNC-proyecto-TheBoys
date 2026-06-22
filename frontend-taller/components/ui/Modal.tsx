@@ -14,13 +14,9 @@ interface ModalProps {
 
 export default function Modal({ isOpen, onClose, title, children, size = 'md' }: ModalProps) {
   useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
+    document.body.style.overflow = isOpen ? 'hidden' : '';
     return () => {
-      document.body.style.overflow = 'unset';
+      document.body.style.overflow = '';
     };
   }, [isOpen]);
 
@@ -34,38 +30,49 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md' }:
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
-        <div
-          className="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75"
-          onClick={onClose}
-        />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        aria-label="Cerrar modal"
+        className="absolute inset-0 bg-black/50"
+        onClick={onClose}
+      />
 
-        <span className="hidden sm:inline-block sm:align-middle sm:h-screen">&#8203;</span>
-
-        <div className={`inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle ${sizeClasses[size]} w-full`}>
-          {title && (
-            <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-              <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
-              <button
-                onClick={onClose}
-                className="text-gray-400 hover:text-gray-500 focus:outline-none"
-              >
-                <X size={20} />
-              </button>
-            </div>
-          )}
-          {!title && (
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? 'modal-title' : undefined}
+        className={`relative max-h-[calc(100vh-2rem)] w-full ${sizeClasses[size]} overflow-hidden rounded-lg bg-white text-left shadow-xl`}
+      >
+        {title && (
+          <header className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+            <h3 id="modal-title" className="text-lg font-semibold text-gray-900">
+              {title}
+            </h3>
             <button
+              type="button"
               onClick={onClose}
-              className="absolute top-4 right-4 text-gray-400 hover:text-gray-500 z-10"
+              className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              aria-label="Cerrar"
             >
               <X size={20} />
             </button>
-          )}
-          <div className="px-6 py-4">{children}</div>
-        </div>
-      </div>
+          </header>
+        )}
+
+        {!title && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute right-4 top-4 z-10 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Cerrar"
+          >
+            <X size={20} />
+          </button>
+        )}
+
+        <div className="max-h-[calc(100vh-8rem)] overflow-y-auto px-6 py-4">{children}</div>
+      </section>
     </div>
   );
 }

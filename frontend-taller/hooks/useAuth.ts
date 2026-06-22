@@ -10,7 +10,7 @@ const publicRoutes = ['/login', '/register', '/'];
 const roleRoutes = {
   ADMIN: ['/dashboard/admin-reportes', '/dashboard/admin-inventario', '/dashboard/admin-empleados', '/dashboard/admin-clientes', '/dashboard/admin-sucursales'],
   MECANICO: ['/dashboard/mecanico-citas', '/dashboard/mecanico-ordenes', '/dashboard/mecanico-inventario', '/dashboard/mecanico-historial'],
-  CLIENTE: ['/dashboard/mis-ordenes', '/dashboard/catalogo', '/dashboard/citas', '/dashboard/notificaciones'],
+  CLIENTE: ['/dashboard/mis-ordenes', '/dashboard/catalogo', '/dashboard/citas', '/dashboard/notificaciones', '/dashboard/facturas', '/dashboard/pago'],
 };
 
 export function useAuth() {

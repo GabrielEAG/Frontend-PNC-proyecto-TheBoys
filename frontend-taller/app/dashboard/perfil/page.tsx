@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import { User, Mail, Phone, MapPin, Save } from 'lucide-react';
+import { clienteApi } from '@/lib/api';
 
 export default function PerfilPage() {
   const { user } = useAuthStore();
@@ -17,15 +18,37 @@ export default function PerfilPage() {
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    if (user) {
+
+  const cargarCliente = async () => {
+
+    if (!user) return;
+
+    try {
+
+      const response = await clienteApi.getByUsuarioId(user.id);
+
+      setFormData({
+        nombre: user.nombre || '',
+        email: user.email || '',
+        telefono: response.data.telefono || '',
+        direccion: response.data.direccion || '',
+      });
+
+    } catch {
+
       setFormData({
         nombre: user.nombre || '',
         email: user.email || '',
         telefono: '',
         direccion: '',
       });
+
     }
-  }, [user]);
+  };
+
+  cargarCliente();
+
+}, [user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

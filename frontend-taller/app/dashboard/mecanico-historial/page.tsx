@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ordenApi } from '@/lib/api';
 import { useMecanicoId } from '@/hooks/useClienteId';
 import { OrdenTrabajo } from '@/types';
@@ -10,14 +10,34 @@ export default function MecanicoHistorialPage() {
   const { mecanicoId, loading: loadingMec } = useMecanicoId();
   const [ordenes, setOrdenes] = useState<OrdenTrabajo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const fetchHistorial = useCallback(async () => {
+    if (!mecanicoId) return;
+    try {
+      setLoading(true);
+      setError('');
+      const res = await ordenApi.getByMecanico(mecanicoId);
+      setOrdenes(res.data.filter((o: OrdenTrabajo) => o.estado === 'COMPLETADA'));
+    } catch (err) {
+      console.error(err);
+      setError('No se pudo cargar el historial del mecanico.');
+    } finally {
+      setLoading(false);
+    }
+  }, [mecanicoId]);
 
   useEffect(() => {
-    if (!mecanicoId) return;
-    ordenApi.getByMecanico(mecanicoId)
-      .then(res => setOrdenes(res.data.filter((o: OrdenTrabajo) => o.estado === 'COMPLETADA')))
-      .catch(err => console.error(err))
-      .finally(() => setLoading(false));
-  }, [mecanicoId]);
+    if (loadingMec) return;
+    if (!mecanicoId) {
+      setOrdenes([]);
+      setLoading(false);
+      setError('No se encontro un perfil de mecanico para esta cuenta.');
+      return;
+    }
+
+    void fetchHistorial();
+  }, [mecanicoId, loadingMec, fetchHistorial]);
 
   if (loadingMec || loading) return (
     <div className="flex justify-center items-center h-64">
@@ -28,6 +48,11 @@ export default function MecanicoHistorialPage() {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-6">Historial de Órdenes</h1>
+
+      {error && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">{error}</div>
+      )}
+
       {ordenes.length === 0 ? (
         <div className="bg-white rounded-lg shadow-md p-12 text-center">
           <History className="h-16 w-16 text-gray-400 mx-auto mb-4" />

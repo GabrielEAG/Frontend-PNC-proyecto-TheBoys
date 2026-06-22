@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { citaApi } from '@/lib/api';
 import { useMecanicoId } from '@/hooks/useClienteId';
 import { Cita } from '@/types';
@@ -9,43 +9,53 @@ import { Calendar, Clock, MapPin, Car, CheckCircle, XCircle, RefreshCw } from 'l
 type TabType = 'pendientes' | 'miscitas';
 
 export default function MecanicoCitasPage() {
-  const { mecanicoId, loading: loadingMec } = useMecanicoId();
+  const { mecanicoId, sucursalId, loading: loadingMec } = useMecanicoId();
   const [activeTab, setActiveTab] = useState<TabType>('pendientes');
   const [citasPendientes, setCitasPendientes] = useState<Cita[]>([]);
   const [misCitas, setMisCitas] = useState<Cita[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [showReprogramar, setShowReprogramar] = useState<number | null>(null);
   const [nuevaFecha, setNuevaFecha] = useState('');
   const [nuevaHora, setNuevaHora] = useState('');
 
-  useEffect(() => {
-    if (mecanicoId) fetchCitas();
-  }, [mecanicoId]);
-
-  const fetchCitas = async () => {
-    if (!mecanicoId) return;
+  const fetchCitas = useCallback(async () => {
+    if (!mecanicoId || !sucursalId) return;
     try {
       setLoading(true);
-      // ✅ GET /citas/pendientes — las sin mecánico para que el mecánico las acepte
+      setError('');
       const [pendientesRes, misRes] = await Promise.all([
-        citaApi.getPendientes(),
+        citaApi.getPendientes(sucursalId),
         citaApi.getByMecanico(mecanicoId),
       ]);
       setCitasPendientes(pendientesRes.data);
       setMisCitas(misRes.data);
     } catch (err) {
       console.error('Error:', err);
+      setError('No se pudieron cargar las citas del mecanico.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [mecanicoId, sucursalId]);
 
-  // ✅ PATCH /citas/{id}/aceptar?mecanicoId=X
+  useEffect(() => {
+    if (loadingMec) return;
+    if (!mecanicoId || !sucursalId) {
+      setCitasPendientes([]);
+      setMisCitas([]);
+      setLoading(false);
+      setError('No se encontro un perfil de mecanico o una sucursal asignada para esta cuenta.');
+      return;
+    }
+
+    void fetchCitas();
+  }, [mecanicoId, sucursalId, loadingMec, fetchCitas]);
+
   const handleAceptar = async (citaId: number) => {
     if (!mecanicoId) return;
     try {
       await citaApi.aceptar(citaId, mecanicoId);
-      fetchCitas();
+      void fetchCitas();
       alert('Cita aceptada. Ahora aparece en "Mis Citas".');
     } catch (err: any) {
       alert(err.response?.data?.message || 'Error al aceptar cita');
@@ -56,14 +66,13 @@ export default function MecanicoCitasPage() {
     if (confirm('¿Cancelar esta cita?')) {
       try {
         await citaApi.cancelar(citaId);
-        fetchCitas();
+        void fetchCitas();
       } catch (err: any) {
         alert(err.response?.data?.message || 'Error al cancelar');
       }
     }
   };
 
-  // ✅ PATCH /citas/{id}/reprogramar
   const handleReprogramar = async (citaId: number) => {
     if (!nuevaFecha || !nuevaHora) { alert('Selecciona fecha y hora'); return; }
     try {
@@ -71,7 +80,7 @@ export default function MecanicoCitasPage() {
       setShowReprogramar(null);
       setNuevaFecha('');
       setNuevaHora('');
-      fetchCitas();
+      void fetchCitas();
       alert('Nueva fecha propuesta enviada al cliente.');
     } catch (err: any) {
       alert(err.response?.data?.message || 'Error al reprogramar');
@@ -177,6 +186,10 @@ export default function MecanicoCitasPage() {
   return (
     <div>
       <h1 className="text-2xl font-bold mb-6">Gestión de Citas</h1>
+
+      {error && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">{error}</div>
+      )}
 
       <div className="flex gap-2 mb-6 border-b">
         <button onClick={() => setActiveTab('pendientes')}
