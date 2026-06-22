@@ -1,3 +1,4 @@
+// lib/api.ts
 import axios from 'axios';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
@@ -7,41 +8,155 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Interceptor: agregar JWT
+// ============================================================
+// 🔒 INTERCEPTOR DE SOLICITUDES
+// ============================================================
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-// Interceptor: manejar 401
+// ============================================================
+// 🛡️ INTERCEPTOR DE RESPUESTAS - CON DOBLE PROTECCIÓN
+// ============================================================
+let isRedirecting = false;
+let redirectTimeout: NodeJS.Timeout | null = null;
+let lastErrorTime = 0;
+const ERROR_THROTTLE_MS = 1000;
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    const requestUrl = String(error.config?.url || '');
-    const isAuthRequest = requestUrl.includes('/auth/login') || requestUrl.includes('/auth/register');
-
-    if (error.response?.status === 401 && !isAuthRequest) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      if (window.location.pathname !== '/login') {
-        window.location.replace('/login');
-      }
+    // ✅ Evitar procesar el mismo error múltiples veces
+    const now = Date.now();
+    if (now - lastErrorTime < ERROR_THROTTLE_MS) {
+      return Promise.reject(error);
     }
-    if (error.response?.status === 403) {
+    lastErrorTime = now;
 
-  console.error(
-    error.response?.data?.message ||
-    'No tienes permisos para realizar esta acción.'
-  );
+    // ✅ Evitar redirecciones múltiples
+    if (isRedirecting) {
+      return Promise.reject(error);
+    }
 
-}
+    const requestUrl = String(error.config?.url || '');
+    const isAuthRequest = requestUrl.includes('/auth/login') || 
+                          requestUrl.includes('/auth/register') ||
+                          requestUrl.includes('/auth/refresh');
+
+    const status = error.response?.status;
+    const message = error.response?.data?.message || error.message || 'Error desconocido';
+
+    // ============================================================
+    // 📌 401 - No autorizado (SOLO AQUÍ SE REDIRIGE)
+    // ============================================================
+    if (status === 401 && !isAuthRequest) {
+      const token = localStorage.getItem('token');
+      if (token) {
+        isRedirecting = true;
+        
+        console.warn('🔒 Sesión expirada o inválida. Redirigiendo a login...');
+        
+        // Limpiar sesión
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        sessionStorage.removeItem('token');
+        sessionStorage.removeItem('user');
+        
+        // Redirigir solo si no estamos ya en login
+        if (!window.location.pathname.includes('/login')) {
+          window.location.replace('/login');
+        }
+        
+        // Resetear el flag después de 2 segundos
+        if (redirectTimeout) clearTimeout(redirectTimeout);
+        redirectTimeout = setTimeout(() => {
+          isRedirecting = false;
+          redirectTimeout = null;
+        }, 2000);
+      }
+      return Promise.reject(error);
+    }
+
+    // ============================================================
+    // 📌 403 - Prohibido (sin permisos) - NO REDIRIGIR
+    // ============================================================
+    if (status === 403) {
+      const errorMsg = error.response?.data?.message || 'No tienes permisos para realizar esta acción.';
+      console.error('⛔ Error 403:', errorMsg, 'URL:', requestUrl);
+      
+      // ✅ Disparar evento personalizado
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('api:error:403', { 
+          detail: { message: errorMsg, url: requestUrl, status: 403 } 
+        }));
+      }
+      
+      return Promise.reject(error);
+    }
+
+    // ============================================================
+    // 📌 500 - Error interno del servidor - NUNCA REDIRIGIR
+    // ============================================================
+    if (status === 500) {
+      const errorMsg = error.response?.data?.message || 'Error interno del servidor.';
+      console.error('💥 Error 500:', errorMsg, 'URL:', requestUrl);
+      
+      // ✅ Disparar evento personalizado
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('api:error:500', { 
+          detail: { message: errorMsg, url: requestUrl, status: 500 } 
+        }));
+      }
+      
+      // ✅ NUNCA redirigir al login en errores 500
+      return Promise.reject(error);
+    }
+
+    // ============================================================
+    // 📌 409 - Conflicto
+    // ============================================================
+    if (status === 409) {
+      console.warn('⚠️ Conflicto:', message);
+      return Promise.reject(error);
+    }
+
+    // ============================================================
+    // 📌 404 - No encontrado
+    // ============================================================
+    if (status === 404) {
+      console.warn('🔍 Recurso no encontrado:', requestUrl);
+      return Promise.reject(error);
+    }
+
+    // ============================================================
+    // 📌 Otros errores
+    // ============================================================
+    console.error('❌ Error inesperado:', status, message);
     return Promise.reject(error);
   }
 );
+
+// ============================================================
+// 🔄 HELPER PARA RECONECTAR
+// ============================================================
+export const resetApiState = () => {
+  isRedirecting = false;
+  if (redirectTimeout) {
+    clearTimeout(redirectTimeout);
+    redirectTimeout = null;
+  }
+};
+
+// ============================================================
+// 🛠️ API EXPORTS
+// ============================================================
 
 // ============ AUTH ============
 export const authApi = {
@@ -112,7 +227,7 @@ export const vehiculoApi = {
 // ============ SERVICIOS ============
 export const servicioApi = {
   getAll:                ()              => api.get('/servicios'),
-  getActivos:            ()              => api.get('/servicios'),        // alias para compatibilidad
+  getActivos:            ()              => api.get('/servicios'),
   getAllIncluyendoInactivos: ()           => api.get('/servicios/todos'),
   getById:               (id: number)    => api.get(`/servicios/${id}`),
   create:                (data: any)     => api.post('/servicios', data),
@@ -221,20 +336,18 @@ export const ordenApi = {
 
 // ============ REPORTES (solo ADMIN) ============
 export const reporteApi = {
-  // Órdenes por rango de fechas, con filtro opcional de sucursal
   getOrdenes: (desde: string, hasta: string, sucursalId?: number) => {
     const params = new URLSearchParams({ desde, hasta });
     if (sucursalId) params.append('sucursalId', sucursalId.toString());
     return api.get(`/reportes/ordenes?${params.toString()}`);
   },
-  // Mecánicos con más horas
   getMecanicosPorHoras: () => api.get('/reportes/mecanicos/horas'),
-  // Repuestos más usados
   getRepuestosMasUsados: () => api.get('/reportes/repuestos/mas-usados'),
-  // Órdenes por sucursal
   getOrdenesPorSucursal: () => api.get('/reportes/ordenes/por-sucursal'),
-  // Resumen global
   getResumen: () => api.get('/reportes/resumen'),
 };
 
+// ============================================================
+// 📦 EXPORT DEFAULT
+// ============================================================
 export default api;

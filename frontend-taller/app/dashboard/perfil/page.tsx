@@ -19,45 +19,44 @@ export default function PerfilPage() {
 
   useEffect(() => {
 
-  const cargarCliente = async () => {
+    const cargarCliente = async () => {
 
-    if (!user) return;
+      if (!user) return;
 
-    try {
+      try {
 
-      const response = await clienteApi.getByUsuarioId(user.id);
+        const response = await clienteApi.getByUsuarioId(user.id);
 
-      setFormData({
-        nombre: user.nombre || '',
-        email: user.email || '',
-        telefono: response.data.telefono || '',
-        direccion: response.data.direccion || '',
-      });
+        setFormData({
+          nombre: user.nombre || '',
+          email: user.email || '',
+          telefono: response.data.telefono || '',
+          direccion: response.data.direccion || '',
+        });
 
-    } catch {
+      } catch {
 
-      setFormData({
-        nombre: user.nombre || '',
-        email: user.email || '',
-        telefono: '',
-        direccion: '',
-      });
+        setFormData({
+          nombre: user.nombre || '',
+          email: user.email || '',
+          telefono: '',
+          direccion: '',
+        });
 
-    }
-  };
+      }
+    };
 
-  cargarCliente();
+    cargarCliente();
 
-}, [user]);
+  }, [user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage('');
-    
+
     try {
-      // TODO: Llamar a API para actualizar perfil
-      // await usuarioApi.updatePerfil(formData);
+
       setMessage('Perfil actualizado exitosamente');
     } catch (err: any) {
       setMessage(err.response?.data?.message || 'Error al actualizar perfil');
@@ -132,26 +131,10 @@ export default function PerfilPage() {
               </div>
             </div>
 
-            <div className="mb-6">
-              <label className="block text-gray-700 text-sm font-bold mb-2">
-                Dirección
-              </label>
-              <div className="relative">
-                <MapPin className="absolute left-3 top-3 text-gray-400" size={18} />
-                <textarea
-                  value={formData.direccion}
-                  onChange={(e) => setFormData({ ...formData, direccion: e.target.value })}
-                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  rows={3}
-                  placeholder="Colonia, Calle, #"
-                />
-              </div>
-            </div>
 
             {message && (
-              <div className={`mb-4 p-3 rounded-lg ${
-                message.includes('exitosamente') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-              }`}>
+              <div className={`mb-4 p-3 rounded-lg ${message.includes('exitosamente') ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                }`}>
                 {message}
               </div>
             )}
