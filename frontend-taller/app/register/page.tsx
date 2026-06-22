@@ -29,14 +29,38 @@ export default function RegisterPage() {
       return;
     }
 
+    const email = formData.email.trim().toLowerCase();
+    const telefono = formData.telefono.trim();
+
+if (!formData.nombre.trim() || !formData.apellido.trim() || !email || !telefono || !formData.password) {
+  setError('Completa todos los campos requeridos.');
+  return;
+}
+
+if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  setError('Ingresa un correo electrónico válido.');
+  return;
+}
+
+if (formData.password.length < 6) {
+  setError('La contraseña debe tener al menos 6 caracteres.');
+  return;
+}
+
+if (!/^[0-9+() -]{7,20}$/.test(telefono)) {
+  setError('Ingresa un número de teléfono válido.');
+  return;
+}
+
     try {
       await register({
-        email: formData.email.trim(),
-        password: formData.password,
-        nombre: formData.nombre.trim(),
-        apellido: formData.apellido.trim(),
-        telefono: formData.telefono.trim(),
-      });
+      nombre: formData.nombre.trim(),
+      apellido: formData.apellido.trim(),
+      email,
+      telefono,
+      password: formData.password,
+  rol: 'CLIENTE',
+});
       router.replace('/dashboard');
     } catch (err) {
       setError(getAuthErrorMessage(err, 'No se pudo crear la cuenta. Revisa tus datos.'));

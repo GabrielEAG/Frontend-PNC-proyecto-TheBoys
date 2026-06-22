@@ -41,6 +41,7 @@ export default function CitaForm({
 }: CitaFormProps) {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<CitaFormData>(() => buildInitialForm(servicioPreseleccionado));
+  const [formError, setFormError] = useState('');
 
   const serviciosActivos = useMemo(
     () => servicios.filter((servicio) => servicio.estado === 'ACTIVO'),
@@ -62,25 +63,47 @@ export default function CitaForm({
   const faltanDatosBase = sucursales.length === 0 || vehiculos.length === 0 || serviciosActivos.length === 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (faltanDatosBase || loading) return;
-    if (!formData.sucursalId || !formData.patente || !formData.fecha || !formData.hora) {
-      alert('Completa todos los campos obligatorios');
-      return;
-    }
-    if (formData.serviciosIds.length === 0) {
-      alert('Selecciona al menos un servicio');
-      return;
-    }
+  e.preventDefault();
+  setFormError('');
 
-    setLoading(true);
-    try {
-      await onSubmit(formData);
-      onClose();
-    } finally {
-      setLoading(false);
-    }
-  };
+  if (loading) return;
+
+  if (sucursales.length === 0) {
+    setFormError('No hay sucursales disponibles para agendar una cita.');
+    return;
+  }
+
+  if (vehiculos.length === 0) {
+    setFormError('Debes registrar un vehículo antes de crear una cita.');
+    return;
+  }
+
+  if (serviciosActivos.length === 0) {
+    setFormError('No hay servicios activos para seleccionar.');
+    return;
+  }
+
+  if (!formData.sucursalId || !formData.patente || !formData.fecha || !formData.hora) {
+    setFormError('Completa todos los campos obligatorios.');
+    return;
+  }
+
+  if (formData.serviciosIds.length === 0) {
+    setFormError('Selecciona al menos un servicio.');
+    return;
+  }
+
+  setLoading(true);
+
+  try {
+    await onSubmit(formData);
+    onClose();
+  } catch {
+    setFormError('No se pudo crear la cita. Revisa los datos e intenta nuevamente.');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const toggleServicio = (servicioId: number) => {
     setFormData((prev) => ({
@@ -93,31 +116,39 @@ export default function CitaForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {faltanDatosBase && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          {sucursales.length === 0 && <p>No hay sucursales disponibles para agendar.</p>}
-          {vehiculos.length === 0 && (
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p>Registra un vehiculo antes de crear una cita.</p>
-              {onAddVehiculo && (
-                <button
-                  type="button"
-                  onClick={onAddVehiculo}
-                  className="rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700"
-                >
-                  Agregar vehiculo
-                </button>
-              )}
-            </div>
+  {faltanDatosBase && (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+      {sucursales.length === 0 && <p>No hay sucursales disponibles para agendar.</p>}
+
+      {vehiculos.length === 0 && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p>Registra un vehiculo antes de crear una cita.</p>
+          {onAddVehiculo && (
+            <button
+              type="button"
+              onClick={onAddVehiculo}
+              className="rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700"
+            >
+              Agregar vehiculo
+            </button>
           )}
-          {serviciosActivos.length === 0 && <p>No hay servicios activos para seleccionar.</p>}
         </div>
       )}
 
-      <div>
-        <label className="mb-1 flex items-center gap-2 text-sm font-bold text-gray-700">
-          <MapPin size={16} /> Sucursal *
-        </label>
+      {serviciosActivos.length === 0 && <p>No hay servicios activos para seleccionar.</p>}
+    </div>
+  )}
+
+  {formError && (
+    <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+      {formError}
+    </div>
+  )}
+
+  <div>
+    <label className="mb-1 flex items-center gap-2 text-sm font-bold text-gray-700">
+      <MapPin size={16} /> Sucursal *
+    </label>
         <select
           value={formData.sucursalId}
           onChange={(e) => setFormData({ ...formData, sucursalId: e.target.value })}
@@ -225,13 +256,19 @@ export default function CitaForm({
         >
           Cancelar
         </button>
-        <button
-          type="submit"
-          disabled={loading || faltanDatosBase}
-          className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {loading ? 'Agendando...' : 'Agendar cita'}
-        </button>
+        
+<button
+  type="submit"
+  disabled={loading || faltanDatosBase}
+  className={`rounded-lg px-4 py-2 text-sm font-bold text-white ${
+    loading || faltanDatosBase
+      ? 'cursor-not-allowed bg-gray-400'
+      : 'bg-blue-700 hover:bg-blue-800'
+  }`}
+>
+  {loading ? 'Agendando...' : 'Agendar cita'}
+</button>
+
       </div>
     </form>
   );

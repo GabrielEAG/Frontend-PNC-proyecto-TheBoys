@@ -1,4 +1,3 @@
-// lib/api.ts
 import axios from 'axios';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api/v1';
@@ -8,282 +7,346 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+type ApiErrorEventDetail = {
+  status?: number;
+  message: string;
+  url: string;
+};
+
+type ApiErrorPayload = {
+  message?: string;
+  error?: string;
+};
+
+type ApiError = {
+  message?: string;
+  config?: {
+    url?: string;
+  };
+  response?: {
+    status?: number;
+    data?: ApiErrorPayload;
+  };
+};
+
 // ============================================================
-// 🔒 INTERCEPTOR DE SOLICITUDES
+// Estado interno del cliente API
+// ============================================================
+let isRedirecting = false;
+let redirectTimeout: ReturnType<typeof setTimeout> | null = null;
+let lastErrorEventTime = 0;
+
+const ERROR_EVENT_THROTTLE_MS = 800;
+
+const isBrowser = () => typeof window !== 'undefined';
+
+const getStoredToken = () => {
+  if (!isBrowser()) return null;
+  return localStorage.getItem('token') || sessionStorage.getItem('token');
+};
+
+const clearStoredSession = () => {
+  if (!isBrowser()) return;
+
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  sessionStorage.removeItem('token');
+  sessionStorage.removeItem('user');
+};
+
+const dispatchApiErrorEvent = (eventName: string, detail: ApiErrorEventDetail) => {
+  if (!isBrowser()) return;
+
+  const now = Date.now();
+
+  if (now - lastErrorEventTime < ERROR_EVENT_THROTTLE_MS) {
+    return;
+  }
+
+  lastErrorEventTime = now;
+  window.dispatchEvent(new CustomEvent(eventName, { detail }));
+};
+
+const getErrorMessage = (error: ApiError, fallback: string) => {
+  return error.response?.data?.message || error.response?.data?.error || error.message || fallback;
+};
+
+// ============================================================
+// Interceptor: agregar JWT
 // ============================================================
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = getStoredToken();
+
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
     return config;
   },
   (error) => Promise.reject(error)
 );
 
 // ============================================================
-// 🛡️ INTERCEPTOR DE RESPUESTAS - CON DOBLE PROTECCIÓN
+// Interceptor: manejo global de respuestas
 // ============================================================
-let isRedirecting = false;
-let redirectTimeout: NodeJS.Timeout | null = null;
-let lastErrorTime = 0;
-const ERROR_THROTTLE_MS = 1000;
-
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    // ✅ Evitar procesar el mismo error múltiples veces
-    const now = Date.now();
-    if (now - lastErrorTime < ERROR_THROTTLE_MS) {
-      return Promise.reject(error);
-    }
-    lastErrorTime = now;
-
-    // ✅ Evitar redirecciones múltiples
-    if (isRedirecting) {
-      return Promise.reject(error);
-    }
-
+  (error: ApiError) => {
     const requestUrl = String(error.config?.url || '');
-    const isAuthRequest = requestUrl.includes('/auth/login') || 
-                          requestUrl.includes('/auth/register') ||
-                          requestUrl.includes('/auth/refresh');
-
     const status = error.response?.status;
-    const message = error.response?.data?.message || error.message || 'Error desconocido';
+
+    const isAuthRequest =
+      requestUrl.includes('/auth/login') ||
+      requestUrl.includes('/auth/register') ||
+      requestUrl.includes('/auth/refresh');
 
     // ============================================================
-    // 📌 401 - No autorizado (SOLO AQUÍ SE REDIRIGE)
+    // 401: sesión expirada o token inválido
+    // Solo aquí se redirige al login.
     // ============================================================
-    if (status === 401 && !isAuthRequest) {
-      const token = localStorage.getItem('token');
-      if (token) {
+    if (status === 401 && !isAuthRequest && isBrowser()) {
+      if (!isRedirecting) {
         isRedirecting = true;
-        
-        console.warn('🔒 Sesión expirada o inválida. Redirigiendo a login...');
-        
-        // Limpiar sesión
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        sessionStorage.removeItem('token');
-        sessionStorage.removeItem('user');
-        
-        // Redirigir solo si no estamos ya en login
+
+        clearStoredSession();
+
         if (!window.location.pathname.includes('/login')) {
           window.location.replace('/login');
         }
-        
-        // Resetear el flag después de 2 segundos
-        if (redirectTimeout) clearTimeout(redirectTimeout);
+
+        if (redirectTimeout) {
+          clearTimeout(redirectTimeout);
+        }
+
         redirectTimeout = setTimeout(() => {
           isRedirecting = false;
           redirectTimeout = null;
         }, 2000);
       }
+
       return Promise.reject(error);
     }
 
     // ============================================================
-    // 📌 403 - Prohibido (sin permisos) - NO REDIRIGIR
+    // 403: sin permisos
+    // No redirigir y no usar console.error para evitar overlay de Next.
+    // Cada pantalla debe mostrar el mensaje de forma controlada.
     // ============================================================
     if (status === 403) {
-      const errorMsg = error.response?.data?.message || 'No tienes permisos para realizar esta acción.';
-      console.error('⛔ Error 403:', errorMsg, 'URL:', requestUrl);
-      
-      // ✅ Disparar evento personalizado
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('api:error:403', { 
-          detail: { message: errorMsg, url: requestUrl, status: 403 } 
-        }));
-      }
-      
+      const message = getErrorMessage(error, 'No tienes permisos para realizar esta acción.');
+
+      dispatchApiErrorEvent('api:error:403', {
+        status,
+        message,
+        url: requestUrl,
+      });
+
       return Promise.reject(error);
     }
 
     // ============================================================
-    // 📌 500 - Error interno del servidor - NUNCA REDIRIGIR
+    // 500: error interno del servidor
+    // No redirigir al login.
     // ============================================================
     if (status === 500) {
-      const errorMsg = error.response?.data?.message || 'Error interno del servidor.';
-      console.error('💥 Error 500:', errorMsg, 'URL:', requestUrl);
-      
-      // ✅ Disparar evento personalizado
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('api:error:500', { 
-          detail: { message: errorMsg, url: requestUrl, status: 500 } 
-        }));
-      }
-      
-      // ✅ NUNCA redirigir al login en errores 500
+      const message = getErrorMessage(error, 'Error interno del servidor.');
+
+      dispatchApiErrorEvent('api:error:500', {
+        status,
+        message,
+        url: requestUrl,
+      });
+
       return Promise.reject(error);
     }
 
     // ============================================================
-    // 📌 409 - Conflicto
+    // 409: conflicto
     // ============================================================
     if (status === 409) {
-      console.warn('⚠️ Conflicto:', message);
+      const message = getErrorMessage(error, 'Conflicto con los datos enviados.');
+
+      dispatchApiErrorEvent('api:error:409', {
+        status,
+        message,
+        url: requestUrl,
+      });
+
       return Promise.reject(error);
     }
 
     // ============================================================
-    // 📌 404 - No encontrado
+    // 404: recurso no encontrado
     // ============================================================
     if (status === 404) {
-      console.warn('🔍 Recurso no encontrado:', requestUrl);
+      const message = getErrorMessage(error, 'Recurso no encontrado.');
+
+      dispatchApiErrorEvent('api:error:404', {
+        status,
+        message,
+        url: requestUrl,
+      });
+
       return Promise.reject(error);
     }
 
     // ============================================================
-    // 📌 Otros errores
+    // Otros errores
     // ============================================================
-    console.error('❌ Error inesperado:', status, message);
+    if (status) {
+      dispatchApiErrorEvent('api:error', {
+        status,
+        message: getErrorMessage(error, 'Ocurrió un error inesperado.'),
+        url: requestUrl,
+      });
+    }
+
     return Promise.reject(error);
   }
 );
 
 // ============================================================
-// 🔄 HELPER PARA RECONECTAR
+// Helper para resetear estado interno del cliente API
 // ============================================================
 export const resetApiState = () => {
   isRedirecting = false;
+
   if (redirectTimeout) {
     clearTimeout(redirectTimeout);
     redirectTimeout = null;
   }
-};
 
-// ============================================================
-// 🛠️ API EXPORTS
-// ============================================================
+  lastErrorEventTime = 0;
+};
 
 // ============ AUTH ============
 export const authApi = {
-  login:    (data: any) => api.post('/auth/login', data),
+  login: (data: any) => api.post('/auth/login', data),
   register: (data: any) => api.post('/auth/register', data),
 };
 
 // ============ NOTIFICACIONES ============
 export const notificacionApi = {
-  getByUsuario:       (usuarioId: number) => api.get(`/notificaciones/usuario/${usuarioId}`),
-  getNoLeidas:        (usuarioId: number) => api.get(`/notificaciones/usuario/${usuarioId}/no-leidas`),
-  getContadorNoLeidas:(usuarioId: number) => api.get(`/notificaciones/usuario/${usuarioId}/contador`),
-  marcarLeida:        (id: number)        => api.patch(`/notificaciones/${id}/leer`),
-  marcarTodasLeidas:  (usuarioId: number) => api.patch(`/notificaciones/usuario/${usuarioId}/leer-todas`),
+  getByUsuario: (usuarioId: number) => api.get(`/notificaciones/usuario/${usuarioId}`),
+  getNoLeidas: (usuarioId: number) => api.get(`/notificaciones/usuario/${usuarioId}/no-leidas`),
+  getContadorNoLeidas: (usuarioId: number) => api.get(`/notificaciones/usuario/${usuarioId}/contador`),
+  marcarLeida: (id: number) => api.patch(`/notificaciones/${id}/leer`),
+  marcarTodasLeidas: (usuarioId: number) => api.patch(`/notificaciones/usuario/${usuarioId}/leer-todas`),
 };
 
 // ============ USUARIOS ============
 export const usuarioApi = {
-  getAll:        ()                          => api.get('/usuarios'),
-  getById:       (id: number)                => api.get(`/usuarios/${id}`),
-  getMe:         ()                          => api.get('/usuarios/me'),
-  buscarPorEmail:(email: string)             => api.get(`/usuarios/buscar?email=${email}`),
-  update:        (id: number, data: any)     => api.put(`/usuarios/${id}`, data),
-  updateMe:      (data: { nombre: string; apellido: string }) => api.put('/usuarios/me', data),
-  desbloquear:   (id: number)                => api.patch(`/usuarios/${id}/desbloquear`),
-  cambiarRol:    (id: number, data: { nuevoRol: string; sucursalId?: number }) =>
+  getAll: () => api.get('/usuarios'),
+  getById: (id: number) => api.get(`/usuarios/${id}`),
+  getMe: () => api.get('/usuarios/me'),
+  buscarPorEmail: (email: string) => api.get('/usuarios/buscar', { params: { email } }),
+  update: (id: number, data: any) => api.put(`/usuarios/${id}`, data),
+  updateMe: (data: { nombre: string; apellido: string }) => api.put('/usuarios/me', data),
+  desbloquear: (id: number) => api.patch(`/usuarios/${id}/desbloquear`),
+  cambiarRol: (id: number, data: { nuevoRol: string; sucursalId?: number }) =>
     api.patch(`/usuarios/${id}/cambiar-rol`, data),
 };
 
 // ============ SUCURSALES ============
 export const sucursalApi = {
-  getAll:  ()                      => api.get('/sucursales'),
-  getById: (id: number)            => api.get(`/sucursales/${id}`),
-  create:  (data: any)             => api.post('/sucursales', data),
-  update:  (id: number, data: any) => api.put(`/sucursales/${id}`, data),
-  delete:  (id: number)            => api.delete(`/sucursales/${id}`),
+  getAll: () => api.get('/sucursales'),
+  getById: (id: number) => api.get(`/sucursales/${id}`),
+  create: (data: any) => api.post('/sucursales', data),
+  update: (id: number, data: any) => api.put(`/sucursales/${id}`, data),
+  delete: (id: number) => api.delete(`/sucursales/${id}`),
 };
 
 // ============ CLIENTES ============
 export const clienteApi = {
-  getAll:  ()                      => api.get('/clientes'),
-  getById: (id: number)            => api.get(`/clientes/${id}`),
+  getAll: () => api.get('/clientes'),
+  getById: (id: number) => api.get(`/clientes/${id}`),
   getByUsuarioId: (usuarioId: number) => api.get(`/clientes/usuario/${usuarioId}`),
-  create:  (data: any)             => api.post('/clientes', data),
-  update:  (id: number, data: any) => api.put(`/clientes/${id}`, data),
-  delete:  (id: number)            => api.delete(`/clientes/${id}`),
+  create: (data: any) => api.post('/clientes', data),
+  update: (id: number, data: any) => api.put(`/clientes/${id}`, data),
+  delete: (id: number) => api.delete(`/clientes/${id}`),
 };
 
 // ============ MECÁNICOS ============
 export const mecanicoApi = {
-  getAll:        ()                  => api.get('/mecanicos'),
-  getById:       (id: number)        => api.get(`/mecanicos/${id}`),
-  getBySucursal: (sucursalId: number)=> api.get(`/mecanicos/sucursal/${sucursalId}`),
-  getByUsuarioId:(usuarioId: number) => api.get(`/mecanicos/usuario/${usuarioId}`),
-  update:        (id: number, data: any) => api.put(`/mecanicos/${id}`, data),
-  delete:        (id: number)        => api.delete(`/mecanicos/${id}`),
+  getAll: () => api.get('/mecanicos'),
+  getById: (id: number) => api.get(`/mecanicos/${id}`),
+  getBySucursal: (sucursalId: number) => api.get(`/mecanicos/sucursal/${sucursalId}`),
+  getByUsuarioId: (usuarioId: number) => api.get(`/mecanicos/usuario/${usuarioId}`),
+  update: (id: number, data: any) => api.put(`/mecanicos/${id}`, data),
+  delete: (id: number) => api.delete(`/mecanicos/${id}`),
 };
 
 // ============ VEHÍCULOS ============
 export const vehiculoApi = {
-  getByPatente: (patente: string)        => api.get(`/vehiculos/${patente}`),
-  getByCliente: (clienteId: number)      => api.get(`/vehiculos/cliente/${clienteId}`),
-  create:       (data: any)              => api.post('/vehiculos', data),
-  update:       (patente: string, data: any) => api.put(`/vehiculos/${patente}`, data),
-  delete:       (patente: string)        => api.delete(`/vehiculos/${patente}`),
+  getByPatente: (patente: string) => api.get(`/vehiculos/${encodeURIComponent(patente)}`),
+  getByCliente: (clienteId: number) => api.get(`/vehiculos/cliente/${clienteId}`),
+  create: (data: any) => api.post('/vehiculos', data),
+  update: (patente: string, data: any) => api.put(`/vehiculos/${encodeURIComponent(patente)}`, data),
+  delete: (patente: string) => api.delete(`/vehiculos/${encodeURIComponent(patente)}`),
 };
 
 // ============ SERVICIOS ============
 export const servicioApi = {
-  getAll:                ()              => api.get('/servicios'),
-  getActivos:            ()              => api.get('/servicios'),
-  getAllIncluyendoInactivos: ()           => api.get('/servicios/todos'),
-  getById:               (id: number)    => api.get(`/servicios/${id}`),
-  create:                (data: any)     => api.post('/servicios', data),
-  update:                (id: number, data: any) => api.put(`/servicios/${id}`, data),
-  delete:                (id: number)    => api.delete(`/servicios/${id}`),
+  getAll: () => api.get('/servicios'),
+  getActivos: () => api.get('/servicios'),
+  getAllIncluyendoInactivos: () => api.get('/servicios/todos'),
+  getById: (id: number) => api.get(`/servicios/${id}`),
+  create: (data: any) => api.post('/servicios', data),
+  update: (id: number, data: any) => api.put(`/servicios/${id}`, data),
+  delete: (id: number) => api.delete(`/servicios/${id}`),
 };
 
 // ============ PROVEEDORES ============
 export const proveedorApi = {
-  getAll:  ()                      => api.get('/proveedores'),
-  getById: (id: number)            => api.get(`/proveedores/${id}`),
-  create:  (data: any)             => api.post('/proveedores', data),
-  update:  (id: number, data: any) => api.put(`/proveedores/${id}`, data),
-  delete:  (id: number)            => api.delete(`/proveedores/${id}`),
+  getAll: () => api.get('/proveedores'),
+  getById: (id: number) => api.get(`/proveedores/${id}`),
+  create: (data: any) => api.post('/proveedores', data),
+  update: (id: number, data: any) => api.put(`/proveedores/${id}`, data),
+  delete: (id: number) => api.delete(`/proveedores/${id}`),
 };
 
 // ============ REPUESTOS ============
 export const repuestoApi = {
-  getAll:          ()                    => api.get('/repuestos'),
-  getById:         (id: number)          => api.get(`/repuestos/${id}`),
-  getByCategoria:  (categoria: string)   => api.get(`/repuestos/categoria/${categoria}`),
-  buscarPorNombre: (nombre: string)      => api.get(`/repuestos/buscar?nombre=${nombre}`),
-  create:          (data: any)           => api.post('/repuestos', data),
-  update:          (id: number, data: any) => api.put(`/repuestos/${id}`, data),
-  delete:          (id: number)          => api.delete(`/repuestos/${id}`),
+  getAll: () => api.get('/repuestos'),
+  getById: (id: number) => api.get(`/repuestos/${id}`),
+  getByCategoria: (categoria: string) => api.get(`/repuestos/categoria/${encodeURIComponent(categoria)}`),
+  buscarPorNombre: (nombre: string) => api.get('/repuestos/buscar', { params: { nombre } }),
+  create: (data: any) => api.post('/repuestos', data),
+  update: (id: number, data: any) => api.put(`/repuestos/${id}`, data),
+  delete: (id: number) => api.delete(`/repuestos/${id}`),
 };
 
 // ============ INVENTARIO ============
 export const inventarioApi = {
-  getBySucursal: (sucursalId: number)    => api.get(`/inventario/sucursal/${sucursalId}`),
-  getById:       (id: number)            => api.get(`/inventario/${id}`),
-  filtrar: (sucursalId: number, categoria?: string, nombre?: string) => {
-    const params = new URLSearchParams();
-    if (categoria) params.append('categoria', categoria);
-    if (nombre)    params.append('nombre', nombre);
-    return api.get(`/inventario/sucursal/${sucursalId}/filtrar?${params.toString()}`);
-  },
-  create:        (data: any)             => api.post('/inventario', data),
-  update:        (id: number, data: any) => api.put(`/inventario/${id}`, data),
-  delete:        (id: number)            => api.delete(`/inventario/${id}`),
+  getBySucursal: (sucursalId: number) => api.get(`/inventario/sucursal/${sucursalId}`),
+  getById: (id: number) => api.get(`/inventario/${id}`),
+  filtrar: (sucursalId: number, categoria?: string, nombre?: string) =>
+    api.get(`/inventario/sucursal/${sucursalId}/filtrar`, {
+      params: {
+        ...(categoria ? { categoria } : {}),
+        ...(nombre ? { nombre } : {}),
+      },
+    }),
+  create: (data: any) => api.post('/inventario', data),
+  update: (id: number, data: any) => api.put(`/inventario/${id}`, data),
+  delete: (id: number) => api.delete(`/inventario/${id}`),
 };
 
 // ============ REGISTRO DE HORAS ============
 export const horasApi = {
   getByMecanico: (mecanicoId: number) => api.get(`/horas/mecanico/${mecanicoId}`),
-  create:        (data: any)          => api.post('/horas', data),
-  delete:        (id: number)         => api.delete(`/horas/${id}`),
+  create: (data: any) => api.post('/horas', data),
+  delete: (id: number) => api.delete(`/horas/${id}`),
 };
 
 // ============ FACTURAS ============
 export const facturaApi = {
-  getAll:       ()                  => api.get('/facturas'),
-  getById:      (id: number)        => api.get(`/facturas/${id}`),
-  getByOrden:   (ordenId: number)   => api.get(`/facturas/orden/${ordenId}`),
+  getAll: () => api.get('/facturas'),
+  getById: (id: number) => api.get(`/facturas/${id}`),
+  getByOrden: (ordenId: number) => api.get(`/facturas/orden/${ordenId}`),
   getByCliente: (clienteId: number) => api.get(`/facturas/cliente/${clienteId}`),
-  pagar:        (data: { ordenId: number; metodoPago: 'EFECTIVO' | 'TARJETA' | 'STRIPE' }) =>
+  pagar: (data: { ordenId: number; metodoPago: 'EFECTIVO' | 'TARJETA' | 'STRIPE' }) =>
     api.post('/facturas/pagar', data),
 };
 
@@ -295,59 +358,64 @@ export const stripeApi = {
 
 // ============ CITAS ============
 export const citaApi = {
-  getById:        (id: number)                      => api.get(`/citas/${id}`),
-  getByCliente:   (clienteId: number)               => api.get(`/citas/cliente/${clienteId}`),
-  getByMecanico:  (mecanicoId: number)              => api.get(`/citas/mecanico/${mecanicoId}`),
-  getBySucursal:  (sucursalId: number, fecha?: string) => {
-    const url = fecha
-      ? `/citas/sucursal/${sucursalId}?fecha=${fecha}`
-      : `/citas/sucursal/${sucursalId}`;
-    return api.get(url);
-  },
-  getPendientes:  (sucursalId?: number)             => api.get('/citas/pendientes', { params: sucursalId ? { sucursalId } : {} }),
-  create:         (data: any)                       => api.post('/citas', data),
-  aceptar:        (id: number, mecanicoId: number)  => api.patch(`/citas/${id}/aceptar?mecanicoId=${mecanicoId}`),
-  reprogramar:    (id: number, data: { nuevaFecha: string; nuevaHora: string }) =>
+  getById: (id: number) => api.get(`/citas/${id}`),
+  getByCliente: (clienteId: number) => api.get(`/citas/cliente/${clienteId}`),
+  getByMecanico: (mecanicoId: number) => api.get(`/citas/mecanico/${mecanicoId}`),
+  getBySucursal: (sucursalId: number, fecha?: string) =>
+    api.get(`/citas/sucursal/${sucursalId}`, {
+      params: fecha ? { fecha } : {},
+    }),
+  getPendientes: (sucursalId?: number) =>
+    api.get('/citas/pendientes', {
+      params: sucursalId ? { sucursalId } : {},
+    }),
+  create: (data: any) => api.post('/citas', data),
+  aceptar: (id: number, mecanicoId: number) =>
+    api.patch(`/citas/${id}/aceptar`, null, { params: { mecanicoId } }),
+  reprogramar: (id: number, data: { nuevaFecha: string; nuevaHora: string }) =>
     api.patch(`/citas/${id}/reprogramar`, data),
-  aceptarReprogramacion: (id: number)              => api.patch(`/citas/${id}/aceptar-reprogramacion`),
-  confirmar:      (id: number)                      => api.patch(`/citas/${id}/confirmar`),
-  cancelar:       (id: number)                      => api.delete(`/citas/${id}`),
+  aceptarReprogramacion: (id: number) => api.patch(`/citas/${id}/aceptar-reprogramacion`),
+  confirmar: (id: number) => api.patch(`/citas/${id}/confirmar`),
+  cancelar: (id: number) => api.delete(`/citas/${id}`),
 };
 
 // ============ ÓRDENES DE TRABAJO ============
 export const ordenApi = {
-  create:               (data: any)           => api.post('/ordenes', data),
-  getAll:               ()                    => api.get('/ordenes'),
-  getById:              (id: number)          => api.get(`/ordenes/${id}`),
-  getByCliente:         (clienteId: number)   => api.get(`/ordenes/cliente/${clienteId}`),
-  getByMecanico:        (mecanicoId: number)  => api.get(`/ordenes/mecanico/${mecanicoId}`),
-  getByVehiculo:        (patente: string)     => api.get(`/ordenes/vehiculo/${patente}`),
-  getPendientes:        (sucursalId?: number) => api.get('/ordenes/pendientes', { params: sucursalId ? { sucursalId } : {} }),
-  asignarMecanico:      (id: number, mecanicoId: number) =>
+  create: (data: any) => api.post('/ordenes', data),
+  getAll: () => api.get('/ordenes'),
+  getById: (id: number) => api.get(`/ordenes/${id}`),
+  getByCliente: (clienteId: number) => api.get(`/ordenes/cliente/${clienteId}`),
+  getByMecanico: (mecanicoId: number) => api.get(`/ordenes/mecanico/${mecanicoId}`),
+  getByVehiculo: (patente: string) => api.get(`/ordenes/vehiculo/${encodeURIComponent(patente)}`),
+  getPendientes: (sucursalId?: number) =>
+    api.get('/ordenes/pendientes', {
+      params: sucursalId ? { sucursalId } : {},
+    }),
+  asignarMecanico: (id: number, mecanicoId: number) =>
     api.patch(`/ordenes/${id}/asignar-mecanico`, null, { params: { mecanicoId } }),
-  cambiarEstado:        (id: number, estado: string) =>
-    api.patch(`/ordenes/${id}/estado?estado=${estado}`),
-  enviarPresupuesto:    (id: number, data: any) => api.patch(`/ordenes/${id}/presupuesto`, data),
-  aprobarPresupuesto:   (id: number)          => api.patch(`/ordenes/${id}/aprobar-presupuesto`),
-  rechazarPresupuesto:  (id: number)          => api.patch(`/ordenes/${id}/rechazar-presupuesto`),
-  marcarCompletada:     (id: number)          => api.patch(`/ordenes/${id}/completar`),
-  cancelar:             (id: number)          => api.delete(`/ordenes/${id}`),
+  cambiarEstado: (id: number, estado: string) =>
+    api.patch(`/ordenes/${id}/estado`, null, { params: { estado } }),
+  enviarPresupuesto: (id: number, data: any) => api.patch(`/ordenes/${id}/presupuesto`, data),
+  aprobarPresupuesto: (id: number) => api.patch(`/ordenes/${id}/aprobar-presupuesto`),
+  rechazarPresupuesto: (id: number) => api.patch(`/ordenes/${id}/rechazar-presupuesto`),
+  marcarCompletada: (id: number) => api.patch(`/ordenes/${id}/completar`),
+  cancelar: (id: number) => api.delete(`/ordenes/${id}`),
 };
 
-// ============ REPORTES (solo ADMIN) ============
+// ============ REPORTES ============
 export const reporteApi = {
-  getOrdenes: (desde: string, hasta: string, sucursalId?: number) => {
-    const params = new URLSearchParams({ desde, hasta });
-    if (sucursalId) params.append('sucursalId', sucursalId.toString());
-    return api.get(`/reportes/ordenes?${params.toString()}`);
-  },
+  getOrdenes: (desde: string, hasta: string, sucursalId?: number) =>
+    api.get('/reportes/ordenes', {
+      params: {
+        desde,
+        hasta,
+        ...(sucursalId ? { sucursalId } : {}),
+      },
+    }),
   getMecanicosPorHoras: () => api.get('/reportes/mecanicos/horas'),
   getRepuestosMasUsados: () => api.get('/reportes/repuestos/mas-usados'),
   getOrdenesPorSucursal: () => api.get('/reportes/ordenes/por-sucursal'),
   getResumen: () => api.get('/reportes/resumen'),
 };
 
-// ============================================================
-// 📦 EXPORT DEFAULT
-// ============================================================
 export default api;
