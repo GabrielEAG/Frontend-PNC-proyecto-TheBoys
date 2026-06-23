@@ -18,19 +18,32 @@ export default function LoginPage() {
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
+  e.preventDefault();
+  setError('');
 
-    try {
-      await login({
-        email: formData.email.trim(),
-        password: formData.password,
-      });
-      router.replace('/dashboard');
-    } catch (err) {
-      setError(getAuthErrorMessage(err, 'No se pudo iniciar sesion. Intenta nuevamente.'));
-    }
-  };
+  const email = formData.email.trim().toLowerCase();
+
+  if (!email || !formData.password) {
+    setError('Ingresa tu correo y contraseña para continuar.');
+    return;
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    setError('Ingresa un correo electrónico válido.');
+    return;
+  }
+
+  try {
+    await login({
+      email,
+      password: formData.password,
+    });
+
+    router.replace('/dashboard');
+  } catch (err) {
+    setError(getAuthErrorMessage(err, 'No se pudo iniciar sesión. Intenta nuevamente.'));
+  }
+};
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-r from-blue-900 to-blue-700 px-4">
