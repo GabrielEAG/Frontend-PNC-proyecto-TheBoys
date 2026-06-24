@@ -1,9 +1,8 @@
 // app/dashboard/layout.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { useAuthStore } from '@/store/authStore';
+import { useState } from 'react';
+import { useAuth } from '@/hooks/useAuth';
 import Header from '@/components/layout/Header';
 import Sidebar from '@/components/layout/Sidebar';
 
@@ -12,23 +11,21 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const router = useRouter();
-  const { user, token } = useAuthStore();
+  const { user, isLoading } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  useEffect(() => {
-    if (!token || !user) {
-      router.replace('/login');
-    }
-  }, [token, user, router]);
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-blue-700" />
+      </div>
+    );
+  }
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-700 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Cargando...</p>
-        </div>
+      <div className="flex h-screen items-center justify-center">
+        <div className="h-12 w-12 animate-spin rounded-full border-b-2 border-blue-700" />
       </div>
     );
   }
@@ -36,8 +33,10 @@ export default function DashboardLayout({
   return (
     <div className="min-h-screen bg-gray-100">
       <Header sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
+
       <div className="flex">
         <Sidebar sidebarOpen={sidebarOpen} userRole={user.rol} />
+
         <main
           className={`flex-1 transition-all duration-300 ${
             sidebarOpen ? 'ml-64' : 'ml-20'

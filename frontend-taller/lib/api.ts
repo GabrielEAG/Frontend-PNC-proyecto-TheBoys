@@ -7,12 +7,6 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-type ApiErrorEventDetail = {
-  status?: number;
-  message: string;
-  url: string;
-};
-
 type ApiErrorPayload = {
   message?: string;
   error?: string;
@@ -29,9 +23,6 @@ type ApiError = {
   };
 };
 
-// ============================================================
-// Estado interno del cliente API
-// ============================================================
 let isRedirecting = false;
 let redirectTimeout: ReturnType<typeof setTimeout> | null = null;
 let lastErrorEventTime = 0;
@@ -40,9 +31,28 @@ const ERROR_EVENT_THROTTLE_MS = 800;
 
 const isBrowser = () => typeof window !== 'undefined';
 
+const getTokenFromPersistedStore = () => {
+  if (!isBrowser()) return null;
+
+  const raw = localStorage.getItem('auth-storage');
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed?.state?.token || null;
+  } catch {
+    return null;
+  }
+};
+
 const getStoredToken = () => {
   if (!isBrowser()) return null;
-  return localStorage.getItem('token') || sessionStorage.getItem('token');
+
+  return (
+    localStorage.getItem('token') ||
+    sessionStorage.getItem('token') ||
+    getTokenFromPersistedStore()
+  );
 };
 
 const clearStoredSession = () => {
@@ -50,11 +60,20 @@ const clearStoredSession = () => {
 
   localStorage.removeItem('token');
   localStorage.removeItem('user');
+  localStorage.removeItem('auth-storage');
+
   sessionStorage.removeItem('token');
   sessionStorage.removeItem('user');
 };
 
-const dispatchApiErrorEvent = (eventName: string, detail: ApiErrorEventDetail) => {
+const getErrorMessage = (error: ApiError, fallback: string) => {
+  return error.response?.data?.message || error.response?.data?.error || error.message || fallback;
+};
+
+const dispatchApiErrorEvent = (
+  eventName: string,
+  detail: { status?: number; message: string; url: string }
+) => {
   if (!isBrowser()) return;
 
   const now = Date.now();
@@ -67,13 +86,7 @@ const dispatchApiErrorEvent = (eventName: string, detail: ApiErrorEventDetail) =
   window.dispatchEvent(new CustomEvent(eventName, { detail }));
 };
 
-const getErrorMessage = (error: ApiError, fallback: string) => {
-  return error.response?.data?.message || error.response?.data?.error || error.message || fallback;
-};
-
-// ============================================================
 // Interceptor: agregar JWT
-// ============================================================
 api.interceptors.request.use(
   (config) => {
     const token = getStoredToken();
@@ -87,9 +100,7 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// ============================================================
-// Interceptor: manejo global de respuestas
-// ============================================================
+// Interceptor: manejo global de errores
 api.interceptors.response.use(
   (response) => response,
   (error: ApiError) => {
@@ -101,10 +112,6 @@ api.interceptors.response.use(
       requestUrl.includes('/auth/register') ||
       requestUrl.includes('/auth/refresh');
 
-    // ============================================================
-    // 401: sesión expirada o token inválido
-    // Solo aquí se redirige al login.
-    // ============================================================
     if (status === 401 && !isAuthRequest && isBrowser()) {
       if (!isRedirecting) {
         isRedirecting = true;
@@ -128,72 +135,46 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    // ============================================================
-    // 403: sin permisos
-    // No redirigir y no usar console.error para evitar overlay de Next.
-    // Cada pantalla debe mostrar el mensaje de forma controlada.
-    // ============================================================
     if (status === 403) {
-      const message = getErrorMessage(error, 'No tienes permisos para realizar esta acción.');
-
       dispatchApiErrorEvent('api:error:403', {
         status,
-        message,
+        message: getErrorMessage(error, 'No tienes permisos para realizar esta acción.'),
         url: requestUrl,
       });
 
       return Promise.reject(error);
     }
 
-    // ============================================================
-    // 500: error interno del servidor
-    // No redirigir al login.
-    // ============================================================
     if (status === 500) {
-      const message = getErrorMessage(error, 'Error interno del servidor.');
-
       dispatchApiErrorEvent('api:error:500', {
         status,
-        message,
+        message: getErrorMessage(error, 'Error interno del servidor.'),
         url: requestUrl,
       });
 
       return Promise.reject(error);
     }
 
-    // ============================================================
-    // 409: conflicto
-    // ============================================================
-    if (status === 409) {
-      const message = getErrorMessage(error, 'Conflicto con los datos enviados.');
-
-      dispatchApiErrorEvent('api:error:409', {
-        status,
-        message,
-        url: requestUrl,
-      });
-
-      return Promise.reject(error);
-    }
-
-    // ============================================================
-    // 404: recurso no encontrado
-    // ============================================================
     if (status === 404) {
-      const message = getErrorMessage(error, 'Recurso no encontrado.');
-
       dispatchApiErrorEvent('api:error:404', {
         status,
-        message,
+        message: getErrorMessage(error, 'Recurso no encontrado.'),
         url: requestUrl,
       });
 
       return Promise.reject(error);
     }
 
-    // ============================================================
-    // Otros errores
-    // ============================================================
+    if (status === 409) {
+      dispatchApiErrorEvent('api:error:409', {
+        status,
+        message: getErrorMessage(error, 'Conflicto con los datos enviados.'),
+        url: requestUrl,
+      });
+
+      return Promise.reject(error);
+    }
+
     if (status) {
       dispatchApiErrorEvent('api:error', {
         status,
@@ -206,9 +187,6 @@ api.interceptors.response.use(
   }
 );
 
-// ============================================================
-// Helper para resetear estado interno del cliente API
-// ============================================================
 export const resetApiState = () => {
   isRedirecting = false;
 

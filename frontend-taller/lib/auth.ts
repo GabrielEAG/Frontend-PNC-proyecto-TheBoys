@@ -2,6 +2,8 @@
 import api from './api';
 import { AuthResponse, LoginRequest, RegisterRequest, Usuario } from '@/types';
 
+const isBrowser = () => typeof window !== 'undefined';
+
 const buildStoredUser = (data: AuthResponse): Usuario => ({
   id: Number(data.id) || 0,
   email: data.email,
@@ -13,37 +15,55 @@ const buildStoredUser = (data: AuthResponse): Usuario => ({
   sucursalId: data.sucursalId ?? null,
 });
 
+const saveSession = (token: string, user: Usuario) => {
+  if (!isBrowser()) return;
+
+  localStorage.setItem('token', token);
+  localStorage.setItem('user', JSON.stringify(user));
+};
+
+const clearSession = () => {
+  if (!isBrowser()) return;
+
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  localStorage.removeItem('auth-storage');
+
+  sessionStorage.removeItem('token');
+  sessionStorage.removeItem('user');
+};
+
 export const auth = {
   async login(credentials: LoginRequest): Promise<AuthResponse> {
     const response = await api.post('/auth/login', credentials);
-    
-    // Guardar token y datos en localStorage
-    localStorage.setItem('token', response.data.token);
-    localStorage.setItem('user', JSON.stringify(buildStoredUser(response.data)));
-    
+    const user = buildStoredUser(response.data);
+
+    saveSession(response.data.token, user);
+
     return response.data;
   },
 
   async register(userData: RegisterRequest): Promise<AuthResponse> {
-    // Por defecto, el rol es CLIENTE
     const data = { ...userData, rol: userData.rol || 'CLIENTE' };
     const response = await api.post('/auth/register', data);
-    
-    localStorage.setItem('token', response.data.token);
-    localStorage.setItem('user', JSON.stringify(buildStoredUser(response.data)));
-    
+    const user = buildStoredUser(response.data);
+
+    saveSession(response.data.token, user);
+
     return response.data;
   },
 
   logout(): void {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    window.location.href = '/login';
+    clearSession();
   },
 
   getCurrentUser(): Usuario | null {
+    if (!isBrowser()) return null;
+
     const userStr = localStorage.getItem('user');
+
     if (!userStr) return null;
+
     try {
       return JSON.parse(userStr);
     } catch {
@@ -52,6 +72,7 @@ export const auth = {
   },
 
   getToken(): string | null {
+    if (!isBrowser()) return null;
     return localStorage.getItem('token');
   },
 

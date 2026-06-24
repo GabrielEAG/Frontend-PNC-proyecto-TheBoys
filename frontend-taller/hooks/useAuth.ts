@@ -8,58 +8,111 @@ import { useRouter, usePathname } from 'next/navigation';
 const publicRoutes = ['/login', '/register', '/'];
 
 const roleRoutes = {
-  ADMIN: ['/dashboard/admin-reportes', '/dashboard/admin-inventario', '/dashboard/admin-empleados', '/dashboard/admin-clientes', '/dashboard/admin-sucursales'],
-  MECANICO: ['/dashboard/mecanico-citas', '/dashboard/mecanico-ordenes', '/dashboard/mecanico-inventario', '/dashboard/mecanico-historial'],
-  CLIENTE: ['/dashboard/mis-ordenes', '/dashboard/catalogo', '/dashboard/citas', '/dashboard/notificaciones', '/dashboard/facturas', '/dashboard/pago'],
+  ADMIN: [
+    '/dashboard',
+    '/dashboard/perfil',
+    '/dashboard/notificaciones',
+    '/dashboard/admin-reportes',
+    '/dashboard/admin-inventario',
+    '/dashboard/admin-empleados',
+    '/dashboard/admin-clientes',
+    '/dashboard/admin-sucursales',
+  ],
+  MECANICO: [
+    '/dashboard',
+    '/dashboard/perfil',
+    '/dashboard/notificaciones',
+    '/dashboard/mecanico-citas',
+    '/dashboard/mecanico-ordenes',
+    '/dashboard/mecanico-inventario',
+    '/dashboard/mecanico-historial',
+  ],
+  CLIENTE: [
+    '/dashboard',
+    '/dashboard/perfil',
+    '/dashboard/notificaciones',
+    '/dashboard/mis-ordenes',
+    '/dashboard/catalogo',
+    '/dashboard/citas',
+    '/dashboard/facturas',
+    '/dashboard/pago',
+  ],
+};
+
+const isPublicRoute = (pathname: string) => {
+  return publicRoutes.includes(pathname);
+};
+
+const getDefaultRouteByRole = (rol?: string) => {
+  if (rol === 'ADMIN') return '/dashboard/admin-reportes';
+  if (rol === 'MECANICO') return '/dashboard/mecanico-citas';
+  if (rol === 'CLIENTE') return '/dashboard/catalogo';
+
+  return '/dashboard';
+};
+
+const hasRoleAccess = (rol: keyof typeof roleRoutes, pathname: string) => {
+  return roleRoutes[rol].some((route) => pathname === route || pathname.startsWith(`${route}/`));
 };
 
 export function useAuth() {
-  const { user, token, isLoading, login, register, logout } = useAuthStore();
+  const {
+    user,
+    token,
+    isLoading,
+    hasHydrated,
+    login,
+    register,
+    logout,
+    bootstrapSession,
+  } = useAuthStore();
+
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
-    if (!isLoading && !token && !publicRoutes.includes(pathname)) {
-      router.push(`/login?from=${pathname}`);
-    }
-  }, [token, isLoading, pathname, router]);
+    if (!hasHydrated) return;
+    bootstrapSession();
+  }, [hasHydrated, bootstrapSession]);
 
   useEffect(() => {
-    if (token && user && !publicRoutes.includes(pathname)) {
-      // Verificar acceso por rol
-      if (pathname.startsWith('/dashboard')) {
-        let hasAccess = false;
-        
-        if (user.rol === 'ADMIN') {
-          hasAccess = true;
-        } else if (user.rol === 'MECANICO') {
-          hasAccess = roleRoutes.MECANICO.some(route => pathname.startsWith(route));
-        } else if (user.rol === 'CLIENTE') {
-          hasAccess = roleRoutes.CLIENTE.some(route => pathname.startsWith(route));
-        }
+    if (!hasHydrated || isLoading) return;
 
-        if (!hasAccess && pathname !== '/dashboard') {
-          // Redirigir al dashboard correspondiente
-          if (user.rol === 'MECANICO') router.push('/dashboard/mecanico-citas');
-          else if (user.rol === 'CLIENTE') router.push('/dashboard/mis-ordenes');
-          else router.push('/dashboard/admin-reportes');
-        }
-      }
+    if (!token && !isPublicRoute(pathname)) {
+      router.replace(`/login?from=${encodeURIComponent(pathname)}`);
+      return;
     }
-  }, [token, user, pathname, router]);
 
-  const hasRole = (roles: string | string[]): boolean => {
-    if (!user) return false;
-    const rolesArray = Array.isArray(roles) ? roles : [roles];
-    return rolesArray.includes(user.rol);
-  };
+    if (token && isPublicRoute(pathname)) {
+      router.replace(getDefaultRouteByRole(user?.rol));
+    }
+  }, [token, user?.rol, hasHydrated, isLoading, pathname, router]);
+
+  useEffect(() => {
+    if (!hasHydrated || isLoading) return;
+    if (!token || !user) return;
+    if (!pathname.startsWith('/dashboard')) return;
+
+    const rol = user.rol as keyof typeof roleRoutes;
+
+    if (!roleRoutes[rol]) {
+      logout();
+      return;
+    }
+
+    const allowed = hasRoleAccess(rol, pathname);
+
+    if (!allowed) {
+      router.replace(getDefaultRouteByRole(user.rol));
+    }
+  }, [token, user, hasHydrated, isLoading, pathname, router, logout]);
 
   return {
     user,
     token,
-    isLoading,
-    isAuthenticated: !!token,
-    hasRole,
+    isLoading: isLoading || !hasHydrated,
+    hasHydrated,
+    isAuthenticated: !!token && !!user,
     login,
     register,
     logout,
