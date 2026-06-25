@@ -120,9 +120,23 @@ export default function PagoOrden({ ordenId }: PagoOrdenProps) {
           return;
         }
 
+        if (!data.publishableKey.startsWith('pk_')) {
+          setCardError(
+            'La clave pública de Stripe es inválida (debe empezar con "pk_"). Revisa que las variables STRIPE_PUBLISHABLE_KEY y STRIPE_SECRET_KEY no estén invertidas en el backend.'
+          );
+          return;
+        }
+
         const stripeInstance = await loadStripe(data.publishableKey);
 
-        if (!activo || !stripeInstance) return;
+        if (!activo) return;
+
+        if (!stripeInstance) {
+          setCardError(
+            'No se pudo inicializar Stripe con la clave pública configurada. Verifica que sea una clave válida de modo prueba (pk_test_...).'
+          );
+          return;
+        }
 
         const elementsInstance: StripeElements = stripeInstance.elements();
 
@@ -152,7 +166,8 @@ export default function PagoOrden({ ordenId }: PagoOrdenProps) {
 
         setStripe(stripeInstance);
         cardElementRef.current = cardElement;
-      } catch {
+      } catch (err) {
+        console.error('[Stripe] No se pudo montar el formulario de tarjeta:', err);
         setCardError(
           'No se pudo cargar el formulario de tarjeta. Verifica la configuración de pagos o intenta con otro método.'
         );
