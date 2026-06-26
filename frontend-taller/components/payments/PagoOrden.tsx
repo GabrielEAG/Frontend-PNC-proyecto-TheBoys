@@ -1,33 +1,55 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { facturaApi, stripeApi } from '@/lib/api';
 import { Factura } from '@/types';
 import type { Stripe, StripeCardElement, StripeElements } from '@stripe/stripe-js';
 import { loadStripe } from '@stripe/stripe-js';
 import {
   CreditCard,
-  DollarSign,
   CheckCircle,
   AlertCircle,
   ArrowLeft,
-  ShieldCheck,
   Receipt,
   Banknote,
-  Building2,
   Loader2,
 } from 'lucide-react';
 import Link from 'next/link';
+import Modal from '@/components/ui/Modal';
 
-type MetodoUI = 'STRIPE' | 'EFECTIVO' | 'TARJETA';
-type ApiError = { response?: { data?: { message?: string } } };
+type MetodoUI = 'STRIPE' | 'EFECTIVO';
 
-const getErrorMessage = (error: unknown, fallback: string) =>
-  (error as ApiError).response?.data?.message || fallback;
+type ApiError = {
+  response?: {
+    data?: {
+      message?: string;
+    };
+  };
+};
+
+type AppDialog = {
+  type: 'success' | 'error' | 'warning';
+  title: string;
+  message: string;
+} | null;
 
 interface PagoOrdenProps {
   ordenId: number;
 }
+
+const getErrorMessage = (error: unknown, fallback: string) =>
+  (error as ApiError).response?.data?.message || fallback;
+
+const getPublishableKeyFromResponse = (data: any): string => {
+  return String(
+    data?.publishableKey ||
+      data?.publicKey ||
+      data?.key ||
+      data?.stripePublishableKey ||
+      ''
+  ).trim();
+};
 
 const metodosPago: {
   id: MetodoUI;
@@ -38,30 +60,26 @@ const metodosPago: {
   {
     id: 'STRIPE',
     titulo: 'Pagar en línea',
-    descripcion: 'Tarjeta de crédito o débito mediante Stripe.',
+    descripcion: 'Paga ahora con tarjeta mediante Stripe.',
     icono: CreditCard,
   },
   {
     id: 'EFECTIVO',
     titulo: 'Pago en efectivo',
-    descripcion: 'Registrar pago recibido directamente en el taller.',
+    descripcion: 'Solicita validación del mecánico al pagar en taller.',
     icono: Banknote,
-  },
-  {
-    id: 'TARJETA',
-    titulo: 'Tarjeta en taller',
-    descripcion: 'Registrar pago realizado físicamente con POS.',
-    icono: Building2,
   },
 ];
 
 export default function PagoOrden({ ordenId }: PagoOrdenProps) {
+  const router = useRouter();
+
   const [factura, setFactura] = useState<Factura | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [procesando, setProcesando] = useState(false);
-  const [exito, setExito] = useState(false);
   const [metodo, setMetodo] = useState<MetodoUI>('STRIPE');
+  const [dialog, setDialog] = useState<AppDialog>(null);
 
   const [stripe, setStripe] = useState<Stripe | null>(null);
   const [cardError, setCardError] = useState('');
@@ -87,7 +105,7 @@ export default function PagoOrden({ ordenId }: PagoOrdenProps) {
       setError(
         getErrorMessage(
           err,
-          'No encontramos una factura pendiente para esta orden. Si el trabajo ya fue finalizado recientemente, intenta actualizar la página.'
+          'No encontramos una factura pendiente para esta orden. Si el trabajo fue finalizado recientemente, intenta actualizar la página.'
         )
       );
     } finally {
@@ -100,7 +118,15 @@ export default function PagoOrden({ ordenId }: PagoOrdenProps) {
   }, [fetchFactura]);
 
   useEffect(() => {
-    if (metodo !== 'STRIPE' || !factura || factura.estadoPago === 'PAGADO') return;
+    if (metodo !== 'STRIPE') return;
+    if (!factura) return;
+    if (factura.estadoPago === 'PAGADO') return;
+    if (
+      factura.estadoPago === 'PENDIENTE' &&
+      factura.metodoPago === 'EFECTIVO'
+    ) {
+      return;
+    }
 
     let activo = true;
     let cardElement: StripeCardElement | null = null;
@@ -108,33 +134,33 @@ export default function PagoOrden({ ordenId }: PagoOrdenProps) {
     setCardListo(false);
     setCardError('');
     setStripe(null);
+    cardElementRef.current = null;
 
     const montarStripe = async () => {
       try {
         const { data } = await stripeApi.getConfig();
+        const publishableKey = getPublishableKeyFromResponse(data);
 
-        if (!data.publishableKey) {
+        if (!publishableKey) {
           setCardError(
-            'El pago en línea no está disponible en este momento porque Stripe no tiene una clave pública configurada.'
+            'El pago en línea no está disponible porque no se recibió la clave pública de Stripe. Verifica que el backend devuelva "publishableKey".'
           );
           return;
         }
 
-        if (!data.publishableKey.startsWith('pk_')) {
+        if (!publishableKey.startsWith('pk_')) {
           setCardError(
-            'La clave pública de Stripe es inválida (debe empezar con "pk_"). Revisa que las variables STRIPE_PUBLISHABLE_KEY y STRIPE_SECRET_KEY no estén invertidas en el backend.'
+            'La clave pública de Stripe no es válida. Debe iniciar con "pk_". Revisa que no estén invertidas las claves pública y secreta.'
           );
           return;
         }
 
-        const stripeInstance = await loadStripe(data.publishableKey);
+        const stripeInstance = await loadStripe(publishableKey);
 
         if (!activo) return;
 
         if (!stripeInstance) {
-          setCardError(
-            'No se pudo inicializar Stripe con la clave pública configurada. Verifica que sea una clave válida de modo prueba (pk_test_...).'
-          );
+          setCardError('No se pudo inicializar Stripe con la clave pública configurada.');
           return;
         }
 
@@ -166,10 +192,9 @@ export default function PagoOrden({ ordenId }: PagoOrdenProps) {
 
         setStripe(stripeInstance);
         cardElementRef.current = cardElement;
-      } catch (err) {
-        console.error('[Stripe] No se pudo montar el formulario de tarjeta:', err);
+      } catch {
         setCardError(
-          'No se pudo cargar el formulario de tarjeta. Verifica la configuración de pagos o intenta con otro método.'
+          'No se pudo cargar el formulario de tarjeta. Intenta nuevamente o selecciona pago en efectivo.'
         );
       }
     };
@@ -184,16 +209,22 @@ export default function PagoOrden({ ordenId }: PagoOrdenProps) {
   }, [metodo, factura]);
 
   const handlePagarStripe = async () => {
-    if (!stripe || !cardElementRef.current || !factura) return;
+    if (!stripe || !cardElementRef.current || !factura) {
+      setCardError('El formulario de tarjeta aún no está listo.');
+      return;
+    }
 
     setProcesando(true);
     setError('');
+    setCardError('');
 
     try {
-      const { token, error: tokenError } = await stripe.createToken(cardElementRef.current);
+      const { token, error: tokenError } = await stripe.createToken(
+        cardElementRef.current
+      );
 
       if (tokenError || !token) {
-        setError(tokenError?.message || 'No se pudo validar la tarjeta ingresada.');
+        setCardError(tokenError?.message || 'No se pudo validar la tarjeta ingresada.');
         return;
       }
 
@@ -202,39 +233,52 @@ export default function PagoOrden({ ordenId }: PagoOrdenProps) {
         token: token.id,
       });
 
-      setExito(true);
+      setDialog({
+        type: 'success',
+        title: 'Pago realizado correctamente',
+        message:
+          'Tu pago en línea fue procesado correctamente. La factura ya aparece como pagada.',
+      });
     } catch (err) {
-      setError(
-        getErrorMessage(
+      setDialog({
+        type: 'error',
+        title: 'No se pudo procesar el pago',
+        message: getErrorMessage(
           err,
           'El pago fue rechazado o no pudo completarse. Verifica los datos e intenta nuevamente.'
-        )
-      );
+        ),
+      });
     } finally {
       setProcesando(false);
     }
   };
 
-  const handlePagarManual = async () => {
+  const handleSolicitarPagoEfectivo = async () => {
     if (!factura) return;
 
     setProcesando(true);
     setError('');
+    setCardError('');
 
     try {
-      await facturaApi.pagar({
-        ordenId: factura.ordenId,
-        metodoPago: metodo as 'EFECTIVO' | 'TARJETA',
-      });
+      await facturaApi.solicitarPagoEfectivo(factura.id);
+      await fetchFactura();
 
-      setExito(true);
+      setDialog({
+        type: 'success',
+        title: 'Solicitud enviada al mecánico',
+        message:
+          'Se notificó al mecánico que deseas pagar esta factura en efectivo. La factura quedará pendiente hasta que el mecánico valide el pago en el taller.',
+      });
     } catch (err) {
-      setError(
-        getErrorMessage(
+      setDialog({
+        type: 'error',
+        title: 'No se pudo solicitar pago en efectivo',
+        message: getErrorMessage(
           err,
-          'No se pudo registrar el pago. Verifica la información de la factura e intenta nuevamente.'
-        )
-      );
+          'No se pudo enviar la solicitud de pago en efectivo. Intenta nuevamente.'
+        ),
+      });
     } finally {
       setProcesando(false);
     }
@@ -246,7 +290,17 @@ export default function PagoOrden({ ordenId }: PagoOrdenProps) {
       return;
     }
 
-    void handlePagarManual();
+    void handleSolicitarPagoEfectivo();
+  };
+
+  const handleCerrarDialog = () => {
+    const fueExitoso = dialog?.type === 'success';
+
+    setDialog(null);
+
+    if (fueExitoso) {
+      router.replace('/dashboard/facturas');
+    }
   };
 
   if (loading) {
@@ -270,7 +324,7 @@ export default function PagoOrden({ ordenId }: PagoOrdenProps) {
 
         <Link
           href="/dashboard/mis-ordenes"
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800"
+          className="inline-flex items-center justify-center gap-2 text-sm font-medium text-blue-700 hover:text-blue-800"
         >
           <ArrowLeft size={16} />
           Volver a Mis Órdenes
@@ -279,7 +333,26 @@ export default function PagoOrden({ ordenId }: PagoOrdenProps) {
     );
   }
 
-  if (exito || factura?.estadoPago === 'PAGADO') {
+  const total = Number(factura?.total || 0);
+  const subtotal = Number(factura?.subtotal || 0);
+  const impuestos = Number(factura?.impuestos || 0);
+
+  const facturaPagada = factura?.estadoPago === 'PAGADO';
+
+  const facturaPendienteConfirmacion =
+    factura?.estadoPago === 'PENDIENTE' &&
+    factura?.metodoPago === 'EFECTIVO';
+
+  const metodoActual = metodosPago.find((item) => item.id === metodo);
+  const MetodoIcon = metodoActual?.icono || CreditCard;
+
+  const pagoDeshabilitado =
+    procesando ||
+    facturaPagada ||
+    facturaPendienteConfirmacion ||
+    (metodo === 'STRIPE' && (!cardListo || !stripe));
+
+  if (facturaPagada) {
     return (
       <div className="mx-auto max-w-lg rounded-xl bg-white p-8 text-center shadow-md">
         <CheckCircle className="mx-auto mb-4 h-16 w-16 text-green-600" />
@@ -288,49 +361,26 @@ export default function PagoOrden({ ordenId }: PagoOrdenProps) {
           Pago registrado correctamente
         </h2>
 
-        <p className="mb-2 text-gray-600">
-          La factura #{factura?.id} de la orden #{factura?.ordenId} fue marcada como pagada.
+        <p className="mb-6 text-gray-600">
+          La factura #{factura?.id} ya aparece como pagada.
         </p>
 
-        <p className="mb-6 text-sm text-gray-500">
-          Puedes consultar el comprobante y el historial desde la sección de facturas.
-        </p>
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
-          <Link
-            href="/dashboard/facturas"
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800"
-          >
-            <Receipt size={16} />
-            Ver mis facturas
-          </Link>
-
-          <Link
-            href="/dashboard/mis-ordenes"
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Volver a Mis Órdenes
-          </Link>
-        </div>
+        <Link
+          href="/dashboard/facturas"
+          className="inline-flex items-center justify-center gap-2 text-sm font-medium text-blue-700 hover:text-blue-800"
+        >
+          <Receipt size={16} />
+          Ver mis facturas
+        </Link>
       </div>
     );
   }
-
-  const total = Number(factura?.total || 0);
-  const subtotal = Number(factura?.subtotal || 0);
-  const impuestos = Number(factura?.impuestos || 0);
-
-  const metodoActual = metodosPago.find((item) => item.id === metodo);
-  const MetodoIcon = metodoActual?.icono || CreditCard;
-
-  const stripeNoDisponible = metodo === 'STRIPE' && Boolean(cardError) && !cardListo;
-  const pagoDeshabilitado = procesando || (metodo === 'STRIPE' && (!cardListo || !stripe));
 
   return (
     <div className="mx-auto max-w-2xl">
       <Link
         href="/dashboard/mis-ordenes"
-        className="mb-4 inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700"
+        className="inline-flex items-center gap-2 text-sm font-medium text-blue-700 hover:text-blue-800"
       >
         <ArrowLeft size={16} />
         Volver a Mis Órdenes
@@ -349,29 +399,21 @@ export default function PagoOrden({ ordenId }: PagoOrdenProps) {
               </p>
             </div>
 
-            <span className="rounded-full bg-yellow-100 px-3 py-1 text-xs font-semibold text-yellow-800">
-              Pendiente de pago
+            <span
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                facturaPendienteConfirmacion
+                  ? 'bg-blue-100 text-blue-800'
+                  : 'bg-yellow-100 text-yellow-800'
+              }`}
+            >
+              {facturaPendienteConfirmacion
+                ? 'Pendiente de validación'
+                : 'Pendiente de pago'}
             </span>
           </div>
         </div>
 
         <div className="space-y-6 p-6">
-          <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
-            <div className="flex items-start gap-3">
-              <ShieldCheck className="mt-0.5 h-5 w-5 text-blue-700" />
-
-              <div>
-                <p className="font-semibold text-blue-900">
-                  Revisa el detalle antes de pagar
-                </p>
-
-                <p className="mt-1 text-sm text-blue-800">
-                  El total mostrado abajo es el monto final de la factura e incluye los impuestos correspondientes.
-                </p>
-              </div>
-            </div>
-          </div>
-
           <div className="rounded-xl border border-gray-200 bg-white p-4">
             <div className="mb-3 flex items-center gap-2">
               <Receipt size={18} className="text-gray-500" />
@@ -396,122 +438,188 @@ export default function PagoOrden({ ordenId }: PagoOrdenProps) {
             </div>
           </div>
 
-          <div>
-            <h2 className="mb-3 font-semibold text-gray-900">
-              Selecciona un método de pago
-            </h2>
-
-            <div className="grid gap-3 sm:grid-cols-3">
-              {metodosPago.map((item) => {
-                const Icon = item.icono;
-                const activo = metodo === item.id;
-
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => {
-                      setMetodo(item.id);
-                      setError('');
-                    }}
-                    className={`rounded-xl border p-4 text-left transition ${
-                      activo
-                        ? 'border-blue-700 bg-blue-50 ring-2 ring-blue-100'
-                        : 'border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/40'
-                    }`}
-                  >
-                    <Icon
-                      size={22}
-                      className={activo ? 'text-blue-700' : 'text-gray-500'}
-                    />
-
-                    <p
-                      className={`mt-2 text-sm font-semibold ${
-                        activo ? 'text-blue-900' : 'text-gray-900'
-                      }`}
-                    >
-                      {item.titulo}
-                    </p>
-
-                    <p className="mt-1 text-xs text-gray-500">
-                      {item.descripcion}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {metodo === 'STRIPE' && (
-            <div className="rounded-xl border border-gray-200 p-4">
-              <label className="mb-2 block text-sm font-semibold text-gray-700">
-                Datos de la tarjeta
-              </label>
-
-              <div
-                ref={cardRef}
-                className="rounded-lg border border-gray-300 bg-white p-3"
-              />
-
-              {cardError && (
-                <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                  {cardError}
-                </div>
-              )}
-
-              <p className="mt-3 text-xs text-gray-500">
-                Modo de prueba: usa la tarjeta 4242 4242 4242 4242, una fecha futura y cualquier CVC de 3 dígitos.
-              </p>
-            </div>
-          )}
-
-          {metodo !== 'STRIPE' && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          {facturaPendienteConfirmacion ? (
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-blue-800">
               <div className="flex items-start gap-2">
-                <DollarSign size={18} className="mt-0.5" />
+                <Banknote size={18} className="mt-0.5 shrink-0" />
 
                 <div>
-                  <p className="font-semibold">Registro de pago presencial</p>
-                  <p className="mt-1">
-                    Este método marcará la factura como pagada por un pago recibido directamente en el taller.
+                  <p className="font-semibold">
+                    Su pago en efectivo está en proceso de validación por el mecánico
+                  </p>
+
+                  <p className="mt-1 text-sm">
+                    La factura se marcará como pagada cuando el mecánico confirme que
+                    recibió el efectivo en el taller.
                   </p>
                 </div>
               </div>
             </div>
-          )}
+          ) : (
+            <>
+              <div>
+                <h2 className="mb-3 font-semibold text-gray-900">
+                  Selecciona un método de pago
+                </h2>
 
-          {error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {error}
-            </div>
-          )}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {metodosPago.map((item) => {
+                    const Icon = item.icono;
+                    const activo = metodo === item.id;
 
-          <button
-            type="button"
-            onClick={handlePagar}
-            disabled={pagoDeshabilitado}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-green-600 py-3 font-bold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {procesando ? (
-              <>
-                <Loader2 size={18} className="animate-spin" />
-                Procesando pago...
-              </>
-            ) : (
-              <>
-                <MetodoIcon size={18} />
-                Confirmar pago por ${total.toFixed(2)}
-              </>
-            )}
-          </button>
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          setMetodo(item.id);
+                          setError('');
+                          setCardError('');
+                        }}
+                        className={`rounded-xl border p-4 text-left transition ${
+                          activo
+                            ? 'border-blue-700 bg-blue-50 ring-2 ring-blue-100'
+                            : 'border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/40'
+                        }`}
+                      >
+                        <Icon
+                          size={22}
+                          className={activo ? 'text-blue-700' : 'text-gray-500'}
+                        />
 
-          {stripeNoDisponible && (
-            <p className="text-center text-xs text-gray-500">
-              Si el pago en línea no está disponible, selecciona un método presencial para registrar el pago en taller.
-            </p>
+                        <p
+                          className={`mt-2 text-sm font-semibold ${
+                            activo ? 'text-blue-900' : 'text-gray-900'
+                          }`}
+                        >
+                          {item.titulo}
+                        </p>
+
+                        <p className="mt-1 text-xs text-gray-500">
+                          {item.descripcion}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {metodo === 'STRIPE' && (
+                <div className="rounded-xl border border-gray-200 p-4">
+                  <label className="mb-2 block text-sm font-semibold text-gray-700">
+                    Datos de la tarjeta
+                  </label>
+
+                  <div
+                    ref={cardRef}
+                    className="min-h-[44px] rounded-lg border border-gray-300 bg-white p-3"
+                  />
+
+                  {cardError && (
+                    <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                      {cardError}
+                    </div>
+                  )}
+
+                  <p className="mt-3 text-xs text-gray-500">
+                    Modo de prueba: usa la tarjeta 4242 4242 4242 4242, una fecha futura
+                    y cualquier CVC de 3 dígitos.
+                  </p>
+                </div>
+              )}
+
+              {metodo === 'EFECTIVO' && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+                  <div className="flex items-start gap-2">
+                    <Banknote size={18} className="mt-0.5 shrink-0" />
+
+                    <div>
+                      <p className="font-semibold">Solicitud de pago en efectivo</p>
+
+                      <p className="mt-1">
+                        Esta opción no marca la factura como pagada inmediatamente.
+                        Se enviará una notificación al mecánico para que valide el pago
+                        cuando reciba el dinero en el taller.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {error && (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  {error}
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handlePagar}
+                disabled={pagoDeshabilitado}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-green-600 py-3 font-bold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {procesando ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    Procesando...
+                  </>
+                ) : metodo === 'EFECTIVO' ? (
+                  <>
+                    <Banknote size={18} />
+                    Solicitar validación de pago en efectivo
+                  </>
+                ) : (
+                  <>
+                    <MetodoIcon size={18} />
+                    Pagar en línea ${total.toFixed(2)}
+                  </>
+                )}
+              </button>
+            </>
           )}
         </div>
       </div>
+
+      <Modal
+        isOpen={Boolean(dialog)}
+        onClose={handleCerrarDialog}
+        title={dialog?.title || 'Mensaje'}
+        size="md"
+      >
+        {dialog && (
+          <div className="space-y-4">
+            <div
+              className={`rounded-lg border p-4 ${
+                dialog.type === 'success'
+                  ? 'border-green-200 bg-green-50 text-green-700'
+                  : dialog.type === 'warning'
+                  ? 'border-amber-200 bg-amber-50 text-amber-700'
+                  : 'border-red-200 bg-red-50 text-red-700'
+              }`}
+            >
+              <div className="flex items-start gap-2">
+                {dialog.type === 'success' ? (
+                  <CheckCircle size={20} className="mt-0.5 shrink-0" />
+                ) : (
+                  <AlertCircle size={20} className="mt-0.5 shrink-0" />
+                )}
+
+                <p>{dialog.message}</p>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={handleCerrarDialog}
+                className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800"
+              >
+                Entendido
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
