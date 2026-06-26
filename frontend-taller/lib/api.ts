@@ -324,10 +324,16 @@ export const facturaApi = {
   getById: (id: number) => api.get(`/facturas/${id}`),
   getByOrden: (ordenId: number) => api.get(`/facturas/orden/${ordenId}`),
   getByCliente: (clienteId: number) => api.get(`/facturas/cliente/${clienteId}`),
+
   pagar: (data: { ordenId: number; metodoPago: 'EFECTIVO' | 'TARJETA' | 'STRIPE' }) =>
     api.post('/facturas/pagar', data),
-};
 
+  solicitarPagoEfectivo: (facturaId: number) =>
+    api.patch(`/facturas/${facturaId}/solicitar-pago-efectivo`),
+
+  confirmarPagoEfectivo: (facturaId: number) =>
+    api.patch(`/facturas/${facturaId}/confirmar-pago-efectivo`),
+};
 // ============ PAGOS STRIPE ============
 export const stripeApi = {
   getConfig: () => api.get('/pagos/stripe/config'),

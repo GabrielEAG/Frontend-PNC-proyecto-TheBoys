@@ -9,7 +9,6 @@ import {
   Clock,
   MapPin,
   CheckCircle,
-  XCircle,
   RefreshCw,
   AlertCircle,
 } from 'lucide-react';
@@ -438,27 +437,18 @@ export default function MecanicoCitasPage() {
             </button>
           )}
 
-          {puedeGestionar && (
-            <>
-              <button
-                type="button"
-                onClick={() => abrirFormularioReprogramacion(cita)}
-                className="flex items-center gap-1 rounded-lg bg-yellow-500 px-3 py-1.5 text-sm text-white hover:bg-yellow-600"
-              >
-                <RefreshCw size={14} />
-                Proponer nueva fecha
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setCitaACancelar(cita)}
-                className="flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-sm text-white hover:bg-red-700"
-              >
-                <XCircle size={14} />
-                Cancelar
-              </button>
-            </>
-          )}
+                  {puedeGestionar && (
+          <div className="mt-4 flex flex-wrap gap-2 border-t pt-3">
+            <button
+              type="button"
+              onClick={() => abrirFormularioReprogramacion(cita)}
+              className="flex items-center gap-1 rounded-lg bg-yellow-500 px-3 py-1.5 text-sm text-white hover:bg-yellow-600"
+            >
+              <RefreshCw size={14} />
+              Proponer nueva fecha
+            </button>
+          </div>
+        )}
         </div>
 
         {renderReprogramacionForm(cita)}
