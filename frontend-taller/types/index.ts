@@ -214,7 +214,7 @@ export interface OrdenTrabajoResponse {
   sucursalNombre?: string;
   sucursalId?: number;
   tipoOrden: string;
-  estado: 'PENDIENTE' | 'PENDIENTE_APROBACION' | 'EN_PROGRESO' | 'COMPLETADA' | 'CANCELADA';
+  estado: 'PENDIENTE' | 'PENDIENTE_APROBACION' | 'EN_PROGRESO' | 'ESPERANDO_PAGO' | 'COMPLETADA' | 'CANCELADA';
   fechaCreacion: string;
   fechaFinalizacionEstimada?: string;
   comentarios?: string;

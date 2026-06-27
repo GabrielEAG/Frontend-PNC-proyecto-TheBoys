@@ -548,6 +548,7 @@ export default function MecanicoOrdenesPage() {
       EN_PROGRESO: 'bg-blue-100 text-blue-800',
       COMPLETADA: 'bg-green-100 text-green-800',
       CANCELADA: 'bg-red-100 text-red-800',
+      ESPERANDO_PAGO: 'bg-purple-100 text-purple-800',
     };
 
     return clases[estado] || 'bg-gray-100 text-gray-800';
@@ -560,6 +561,7 @@ export default function MecanicoOrdenesPage() {
       EN_PROGRESO: 'En progreso',
       COMPLETADA: 'Completada',
       CANCELADA: 'Cancelada',
+      ESPERANDO_PAGO: 'Esperando pago',
     };
 
     return textos[estado] || estado.replace('_', ' ');
@@ -920,7 +922,7 @@ export default function MecanicoOrdenesPage() {
                         >
                           {confirmandoPagoFacturaId === factura.id
                             ? 'Confirmando pago...'
-                            : '💰 Confirmar pago en efectivo'}
+                            : ' Confirmar pago en efectivo'}
                         </button>
                       )}
 
@@ -935,7 +937,7 @@ export default function MecanicoOrdenesPage() {
                         >
                           {confirmandoPagoFacturaId === factura.id
                             ? 'Confirmando pago...'
-                            : '✅ Confirmar pago del seguro'}
+                            : 'Confirmar pago del seguro'}
                         </button>
                       )}
                     </div>
